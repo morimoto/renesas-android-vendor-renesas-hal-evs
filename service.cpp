@@ -27,7 +27,7 @@
 #include "EvsEnumerator.h"
 #include "EvsDisplay.h"
 
-#include <vendor/renesas/graphics/composer/1.0/IComposer.h>
+#include <vendor/renesas/graphics/composer/2.0/IComposer.h>
 
 // libhidl:
 using android::hardware::configureRpcThreadpool;
@@ -41,7 +41,7 @@ using android::hardware::automotive::evs::V1_0::IEvsDisplay;
 using namespace android::hardware::automotive::evs::V1_0::renesas;
 using namespace android;
 
-using vendor::renesas::graphics::composer::V1_0::IComposer;
+using vendor::renesas::graphics::composer::V2_0::IComposer;
 
 int main() {
 

@@ -21,7 +21,7 @@
 #include <android/hardware/automotive/evs/1.0/types.h>
 #include <android/hardware/automotive/evs/1.0/IEvsCamera.h>
 #include <ui/GraphicBuffer.h>
-#include <vendor/renesas/graphics/composer/1.0/IComposer.h>
+#include <vendor/renesas/graphics/composer/2.0/IComposer.h>
 
 #include <thread>
 #include <fcntl.h>
@@ -38,7 +38,7 @@ namespace evs {
 namespace V1_0 {
 namespace renesas {
 
-using vendor::renesas::graphics::composer::V1_0::IComposer;
+using vendor::renesas::graphics::composer::V2_0::IComposer;
 
 // From EvsEnumerator.h
 class EvsEnumerator;

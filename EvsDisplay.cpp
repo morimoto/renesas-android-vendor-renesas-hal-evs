@@ -24,9 +24,9 @@
 #include <img_gralloc_common_public.h>
 #include <cmath>
 
-#include <vendor/renesas/graphics/composer/1.0/IComposer.h>
+#include <vendor/renesas/graphics/composer/2.0/IComposer.h>
 
-using vendor::renesas::graphics::composer::V1_0::IComposer;
+using vendor::renesas::graphics::composer::V2_0::IComposer;
 
 namespace android {
 namespace hardware {

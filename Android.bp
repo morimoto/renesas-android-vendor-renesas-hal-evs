@@ -46,7 +46,7 @@ cc_binary {
         "libutils",
         "libion",
         "android.hardware.automotive.evs@1.0",
-        "vendor.renesas.graphics.composer@1.0",
+        "vendor.renesas.graphics.composer@2.0",
     ],
 
      header_libs: [
