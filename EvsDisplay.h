@@ -51,6 +51,13 @@ public:
 
 private:
 
+    enum CameraStreamDisplay: int8_t {
+        DISPLAY_PRIMARY = 0,
+        DISPLAY_EXTERNAL,
+        DISPLAY_SECOND_EXTERNAL,
+        ALL_DISPLAYS
+    } mCameraDisplay = DISPLAY_PRIMARY;
+
     enum BufferState: uint32_t {
         NOT_ALLOCATED = 0,
         FREE,

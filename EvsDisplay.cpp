@@ -128,7 +128,7 @@ Return<EvsResult> EvsDisplay::setDisplayState(DisplayState state) {
 
     if (state == DisplayState::NOT_VISIBLE) {
         if (mComposer != nullptr) {
-            mComposer->setEVSCameraData(nullptr, -1);
+            mComposer->setEVSCameraData(nullptr, mCameraDisplay);
             ALOGI("returnTargetBufferForDisplay | camera stop");
         }
     }
@@ -269,7 +269,7 @@ Return<EvsResult> EvsDisplay::returnTargetBufferForDisplay(const BufferDesc& buf
     } else {
         if (mComposer != nullptr) {
             android::hardware::hidl_handle hbuffer(reinterpret_cast<const native_handle_t*>(mBuffers[buffer.bufferId].handle));
-            mComposer->setEVSCameraData(hbuffer, -1);
+            mComposer->setEVSCameraData(hbuffer, mCameraDisplay);
         } else {
             ALOGE("returnTargetBufferForDisplay | Composer start failed");
         }
