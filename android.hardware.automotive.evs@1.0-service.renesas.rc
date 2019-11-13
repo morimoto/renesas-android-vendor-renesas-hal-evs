@@ -4,3 +4,7 @@ service vendor.evs-1-0 /vendor/bin/hw/android.hardware.automotive.evs@1.0-servic
     user automotive_evs
     group automotive_evs
     shutdown critical
+    disabled # will start explicitly, when binders became ready
+
+on coldboot_done
+    start vendor.evs-1-0
