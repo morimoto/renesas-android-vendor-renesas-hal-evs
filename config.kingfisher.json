@@ -23,7 +23,8 @@
       "yaw" : 180,
       "pitch" : -50,
       "hfov" : 90,
-      "vfov" :30
+      "vfov" : 30,
+      "distort": "pincushion"
     },
     {
       "cameraId" : "/dev/video1",
@@ -34,7 +35,8 @@
       "yaw" : 0,
       "pitch" : -50,
       "hfov" : 90,
-      "vfov" :30
+      "vfov" : 30,
+      "distort": "pincushion"
     },
     {
       "cameraId" : "/dev/video2",
@@ -45,7 +47,8 @@
       "yaw" : 270,
       "pitch" : -50,
       "hfov" : 90,
-      "vfov" :30
+      "vfov" : 30,
+      "distort": "pincushion"
     },
     {
       "cameraId" : "/dev/video3",
@@ -56,7 +59,8 @@
       "yaw" : 90,
       "pitch" : -50,
       "hfov" : 90,
-      "vfov" :30
+      "vfov" : 30,
+      "distort": "pincushion"
     }
   ]
 }

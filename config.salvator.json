@@ -23,7 +23,8 @@
       "yaw" : 180,
       "pitch" : -50,
       "hfov" : 125,
-      "vfov" :80
+      "vfov" : 80,
+      "distort": "none"
     }
   ]
 }
