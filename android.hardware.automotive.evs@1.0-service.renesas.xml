@@ -6,7 +6,6 @@
         <interface>
             <name>IEvsEnumerator</name>
             <instance>EvsEnumeratorHw</instance>
-            <instance>default</instance>
         </interface>
     </hal>
 </manifest>
