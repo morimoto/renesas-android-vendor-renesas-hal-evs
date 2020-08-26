@@ -46,12 +46,12 @@ EvsEnumerator::EvsEnumerator() {
     /*
     For HDMI connector:
     v4l-subdev0 --- rcar_csi2 feaa0000.csi2
-    v4l-subdev1 --- adv748x 4-0070 hdmi
-    v4l-subdev2 --- adv748x 4-0070 txa
+    v4l-subdev2 --- adv748x 4-0070 hdmi
+    v4l-subdev3 --- adv748x 4-0070 txa
     */
 
     /* subdev for HDMI camera input */
-    const char *subdev_name = "/dev/v4l-subdev1";
+    const char *subdev_name = "/dev/v4l-subdev2";
     // Constant predefined list of EVS cameras in the "/dev" filesystem.
     const std::vector<const char *> cameraNames {
         "/dev/video3",
@@ -106,12 +106,12 @@ bool EvsEnumerator::subdevCameraSetup(const char* subdev_name) {
 
     For HDMI connector:
     v4l-subdev0 --- rcar_csi2 feaa0000.csi2
-    v4l-subdev1 --- adv748x 4-0070 hdmi
-    v4l-subdev2 --- adv748x 4-0070 txa
+    v4l-subdev2 --- adv748x 4-0070 hdmi
+    v4l-subdev3 --- adv748x 4-0070 txa
 
     For CVBS connector:
-    v4l-subdev3 --- rcar_csi2 fea80000.csi2
-    v4l-subdev4 --- adv748x 4-0070 afe
+    v4l-subdev4 --- rcar_csi2 fea80000.csi2
+    v4l-subdev1 --- adv748x 4-0070 afe
     v4l-subdev5 --- adv748x 4-0070 txb
 
     Flow of digital data:
@@ -167,12 +167,12 @@ bool EvsEnumerator::subdevCameraSetup(const char* subdev_name) {
 
         /* Set format on source (output, ADV748X_HDMI_SOURCE) pad of ADV7482 HDMI */
         sub_format.pad = 1;
-        if ((fd = open("/dev/v4l-subdev1", O_RDWR)) == -1) {
-            ALOGE("Error while opening device %s: %s", "/dev/v4l-subdev1", strerror(errno));
+        if ((fd = open("/dev/v4l-subdev2", O_RDWR)) == -1) {
+            ALOGE("Error while opening device %s: %s", "/dev/v4l-subdev2", strerror(errno));
             return false;
         }
         if (ioctl(fd, VIDIOC_SUBDEV_S_FMT, &sub_format) < 0) {
-            ALOGE("/dev/v4l-subdev1 VIDIOC_SUBDEV_S_FMT: %s", strerror(errno));
+            ALOGE("/dev/v4l-subdev2 VIDIOC_SUBDEV_S_FMT: %s", strerror(errno));
             close(fd);
             return false;
         }
@@ -180,12 +180,12 @@ bool EvsEnumerator::subdevCameraSetup(const char* subdev_name) {
 
         /* Set format on sink (input, ADV748X_CSI2_SINK) pad of ADV7482 TXA */
         sub_format.pad = 0;
-        if ((fd = open("/dev/v4l-subdev2", O_RDWR)) == -1) {
-            ALOGE("Error while opening device %s: %s", "/dev/v4l-subdev2", strerror(errno));
+        if ((fd = open("/dev/v4l-subdev3", O_RDWR)) == -1) {
+            ALOGE("Error while opening device %s: %s", "/dev/v4l-subdev3", strerror(errno));
             return false;
         }
         if (ioctl(fd, VIDIOC_SUBDEV_S_FMT, &sub_format) < 0) {
-            ALOGE("/dev/v4l-subdev2 VIDIOC_SUBDEV_S_FMT: %s", strerror(errno));
+            ALOGE("/dev/v4l-subdev3 VIDIOC_SUBDEV_S_FMT: %s", strerror(errno));
             close(fd);
             return false;
         }
