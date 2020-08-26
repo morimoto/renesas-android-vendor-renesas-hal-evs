@@ -138,6 +138,47 @@ bool EvsEnumerator::subdevCameraSetup(const char* subdev_name) {
     sub_format.pad = 1;
 
     int fd = -1;
+
+    /*
+     * To enable a link use the media-ctl utility from v4l-utils package
+     * media-ctl -d /dev/media0 -l "'rcar_csi2 feaa0000.csi2':1 -> 'VIN0 output':0 [1]"
+     * or
+     * media-ctl -d /dev/media0 -l "1:1 -> 54:0 [1]"
+     * IDs/indexes were received from here: media-ctl /dev/media0 -p
+     */
+
+    if( (fd = open("/dev/media0", O_RDWR)) == -1) {
+        ALOGE("Error while opening device %s: %s", "/dev/media0", strerror(errno));
+        return false;
+    }
+
+    media_link_desc ulink = {};
+
+    /* source pad - 'rcar_csi2 feaa0000.csi2':1*/
+    ulink.source.entity = 1;
+    ulink.source.index = 1;
+    ulink.source.flags = MEDIA_PAD_FL_SOURCE;
+
+    /* sink pad - 'VIN0 output':0*/
+    ulink.sink.entity = 54;
+    ulink.sink.index = 0;
+    ulink.sink.flags = MEDIA_PAD_FL_SINK;
+
+    ulink.flags = MEDIA_LNK_FL_ENABLED;
+
+    if (ioctl(fd, MEDIA_IOC_SETUP_LINK, &ulink) < 0) {
+        ALOGE("%s MEDIA_IOC_SETUP_LINK: %s", "/dev/media0", strerror(errno));
+        close(fd);
+        return false;
+    }
+    close(fd);
+
+
+    /* Setup video formats
+     * media-ctl -d /dev/media0 -V "'rcar_csi2 feaa0000.csi2':1 [fmt:RGB888_1X24/1920x1080 field:none]"
+     * media-ctl -d /dev/media0 -V "'adv748x 4-0070 hdmi':1 [fmt:RGB888_1X24/1920x1080 field:none]"
+     * media-ctl -d /dev/media0 -V "'adv748x 4-0070 txa':1 [fmt:RGB888_1X24/1920x1080 field:none]"
+     */
     if( (fd = open(subdev_name, O_RDWR)) == -1) {
         ALOGE("Error while opening device %s: %s", subdev_name, strerror(errno));
         return false;
