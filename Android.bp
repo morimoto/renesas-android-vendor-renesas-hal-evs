@@ -18,9 +18,9 @@ cc_binary {
     proprietary: true,
     defaults: ["hidl_defaults"],
     relative_install_path: "hw",
-    name: "android.hardware.automotive.evs@1.0-service.renesas",
-    init_rc: ["android.hardware.automotive.evs@1.0-service.renesas.rc"],
-    vintf_fragments: ["android.hardware.automotive.evs@1.0-service.renesas.xml"],
+    name: "android.hardware.automotive.evs@1.1-service.renesas",
+    init_rc: ["android.hardware.automotive.evs@1.1-service.renesas.rc"],
+    vintf_fragments: ["android.hardware.automotive.evs@1.1-service.renesas.xml"],
 
     srcs: [
         "service.cpp",
@@ -44,11 +44,15 @@ cc_binary {
         "liblog",
         "libutils",
         "libion",
+        "libcamera_metadata",
         "android.hardware.automotive.evs@1.0",
+        "android.hardware.automotive.evs@1.1",
+        "android.hardware.camera.device@3.3",
+        "android.frameworks.automotive.display@1.0",
         "vendor.renesas.graphics.composer@2.0",
     ],
 
-     header_libs: [
+    header_libs: [
         "libgui_headers",
     ],
 

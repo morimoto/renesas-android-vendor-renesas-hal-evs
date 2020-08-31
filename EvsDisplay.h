@@ -18,7 +18,8 @@
 #ifndef VENDOR_RENESAS_HAL_EVS_EVSDISPLAY_H
 #define VENDOR_RENESAS_HAL_EVS_EVSDISPLAY_H
 
-#include <android/hardware/automotive/evs/1.0/IEvsDisplay.h>
+#include <android/hardware/automotive/evs/1.1/IEvsDisplay.h>
+#include <android/frameworks/automotive/display/1.0/IAutomotiveDisplayProxyService.h>
 #include <gui/IConsumerListener.h>
 #include <binder/ProcessState.h>
 #include <vendor/renesas/graphics/composer/2.0/IComposer.h>
@@ -29,9 +30,14 @@ namespace android {
 namespace hardware {
 namespace automotive {
 namespace evs {
-namespace V1_0 {
+namespace V1_1 {
 namespace renesas {
 
+using ::android::hardware::automotive::evs::V1_0::BufferDesc;
+using ::android::hardware::automotive::evs::V1_0::DisplayDesc;
+using ::android::hardware::automotive::evs::V1_0::DisplayState;
+using ::android::hardware::automotive::evs::V1_0::EvsResult;
+using ::android::frameworks::automotive::display::V1_0::IAutomotiveDisplayProxyService;
 using vendor::renesas::graphics::composer::V2_0::IComposer;
 
 class EvsDisplay : public IEvsDisplay {
@@ -42,12 +48,16 @@ public:
     Return<DisplayState> getDisplayState()  override;
     Return<void> getTargetBuffer(getTargetBuffer_cb _hidl_cb)  override;
     Return<EvsResult> returnTargetBufferForDisplay(const BufferDesc& buffer)  override;
+    // Methods from ::android::hardware::automotive::evs::V1_1::IEvsDisplay follow.
+    Return<void> getDisplayInfo_1_1(getDisplayInfo_1_1_cb) override;
 
     // Implementation details
     EvsDisplay();
+    EvsDisplay(sp<IAutomotiveDisplayProxyService> pDisplayProxy, uint64_t displayId);
     ~EvsDisplay() override;
 
     void forceShutdown();   // This gets called if another caller "steals" ownership of the display
+    uint64_t getDisplayId() const {return mDisplayId;}
 
 private:
 
@@ -77,6 +87,9 @@ private:
 
     std::mutex      mAccessLock;
 
+    sp<IAutomotiveDisplayProxyService> mDisplayProxy;
+    uint64_t                           mDisplayId;
+
     int32_t mDisplayWidth;
     int32_t mDisplayHeight;
 
@@ -88,7 +101,7 @@ private:
 };
 
 } // namespace renesas
-} // namespace V1_0
+} // namespace V1_1
 } // namespace evs
 } // namespace automotive
 } // namespace hardware

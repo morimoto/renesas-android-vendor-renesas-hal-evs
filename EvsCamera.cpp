@@ -18,22 +18,19 @@
 #define LOG_TAG "EvsHAL"
 
 #include "EvsCamera.h"
-#include "EvsEnumerator.h"
 
 #include <hardware/gralloc1.h>
 #include <ui/GraphicBufferAllocator.h>
 #include <ui/GraphicBufferMapper.h>
 #include <sys/select.h>
 #include <sys/time.h>
-#include <vendor/renesas/graphics/composer/2.0/IComposer.h>
-
-using vendor::renesas::graphics::composer::V2_0::IComposer;
+#include <utils/SystemClock.h>
 
 namespace android {
 namespace hardware {
 namespace automotive {
 namespace evs {
-namespace V1_0 {
+namespace V1_1 {
 namespace renesas {
 
 #define BYTES_PER_PIXEL 4
@@ -45,6 +42,20 @@ namespace renesas {
 #define BUFFER_FORMAT HAL_PIXEL_FORMAT_BGRA_8888
 #define BUFFER_USAGE (GRALLOC1_PRODUCER_USAGE_GPU_RENDER_TARGET | GRALLOC1_PRODUCER_USAGE_CPU_WRITE_OFTEN | GRALLOC1_PRODUCER_USAGE_CPU_READ_OFTEN)
 
+// Map from EVS to V4L2.
+static std::unordered_map <CameraParam, uint32_t> cidmap {
+    {CameraParam::BRIGHTNESS, V4L2_CID_BRIGHTNESS}
+  , {CameraParam::CONTRAST, V4L2_CID_CONTRAST}
+  , {CameraParam::AUTO_WHITE_BALANCE, V4L2_CID_AUTO_WHITE_BALANCE}
+  , {CameraParam::WHITE_BALANCE_TEMPERATURE, V4L2_CID_WHITE_BALANCE_TEMPERATURE}
+  , {CameraParam::SHARPNESS, V4L2_CID_SHARPNESS}
+  , {CameraParam::AUTO_EXPOSURE, V4L2_CID_EXPOSURE_AUTO}
+  , {CameraParam::ABSOLUTE_EXPOSURE, V4L2_CID_EXPOSURE_ABSOLUTE}
+  , {CameraParam::AUTO_FOCUS, V4L2_CID_FOCUS_AUTO}
+  , {CameraParam::ABSOLUTE_FOCUS, V4L2_CID_FOCUS_ABSOLUTE}
+  , {CameraParam::ABSOLUTE_ZOOM, V4L2_CID_ZOOM_ABSOLUTE}
+};
+
 EvsCamera::EvsCamera(const char *id, uint32_t initWidth, uint32_t initHeight) :
         mFramesAllowed(0),
         mFramesInUse(0),
@@ -55,23 +66,20 @@ EvsCamera::EvsCamera(const char *id, uint32_t initWidth, uint32_t initHeight) :
 
     ALOGD("EvsCamera instantiated");
 
-    mDescription.cameraId = id;
+    mDescription.v1.cameraId = id;
     mWidth  = initWidth;
     mHeight = initHeight;
     mFormat = BUFFER_FORMAT;
     mUsage  = BUFFER_USAGE;
 
-    /*
-     * Needed for configuration of frame buffers and VIN output format
-     * before streaming.
-     */
-    mComposer = IComposer::getService();
-    mDisplayWidth = mComposer->getDisplayWidth();
-    mDisplayHeight = mComposer->getDisplayHeight();
-
     if(!initialize(id)) {
         ALOGE("Failed to open v4l device %s\n", id);
     }
+}
+
+
+EvsCamera::EvsCamera(const char *id, const Stream& config) :
+        EvsCamera(id, config.width, config.height) {
 }
 
 
@@ -265,7 +273,7 @@ int EvsCamera::unregisterBuffers()
 Return<void> EvsCamera::getCameraInfo(getCameraInfo_cb _hidl_cb) {
     ALOGD("getCameraInfo");
     // Send back our self description
-    _hidl_cb(mDescription);
+    _hidl_cb(mDescription.v1);
     return Void();
 }
 
@@ -294,7 +302,7 @@ Return<EvsResult> EvsCamera::setMaxFramesInFlight(uint32_t bufferCount) {
 }
 
 
-Return<EvsResult> EvsCamera::startVideoStream(const ::android::sp<IEvsCameraStream>& stream)  {
+Return<EvsResult> EvsCamera::startVideoStream(const ::android::sp<IEvsCameraStream_1_0>& stream)  {
     ALOGD("startVideoStream");
     std::lock_guard<std::mutex> lock(mAccessLock);
 
@@ -323,7 +331,10 @@ Return<EvsResult> EvsCamera::startVideoStream(const ::android::sp<IEvsCameraStre
         unregisterBuffers();
         return EvsResult::BUFFER_NOT_AVAILABLE;
     }
-    mStream = stream;
+    mStream = IEvsCameraStream_1_1::castFrom(stream).withDefault(nullptr);
+    if (mStream == nullptr) {
+        ALOGE("IEvsCameraStream v1.0 isn't supported!");
+    }
 
     // Start the frame generation thread
     mStreamState = RUNNING;
@@ -343,38 +354,10 @@ bool EvsCamera::startStreaming(bool enable)
     return true;
 }
 
-Return<void> EvsCamera::doneWithFrame(const BufferDesc& buffer)  {
-    {
-        std::lock_guard <std::mutex> lock(mAccessLock);
-        if (buffer.memHandle == nullptr) {
-            ALOGE("ignoring doneWithFrame called with null handle");
-        } else if (buffer.bufferId >= mBuffers.size()) {
-            ALOGE("ignoring doneWithFrame called with invalid bufferId %d (max is %zu)",
-                  buffer.bufferId, mBuffers.size()-1);
-        } else if (!mBuffers[buffer.bufferId].inUse) {
-            ALOGE("ignoring doneWithFrame called on frame %d which is already free",
-                  buffer.bufferId);
-        } else {
-            if(mFramesAllowed <= 0 || mFramesInUse <= 0) {
-                // Should never happen
-                ALOGE("Error in doneWithFrame(). Received a frame when no frames were allowed or in use.");
-                return Void();
-            }
-            if(mStreamState == STOPPED) {
-                //Release buffer that was in use
-                GraphicBufferAllocator &alloc(GraphicBufferAllocator::get());
-                alloc.free(mBuffers[buffer.bufferId].handle);
-                mBuffers[buffer.bufferId].handle = nullptr;
-                mFramesAllowed--;
-            } else {
-                // Mark the frame as available
-                queueBuffer(buffer.bufferId);
-                mBuffers[buffer.bufferId].inUse = false;
-            }
-            mFramesInUse--;
-        }
-    }
-    mBufferCond.notify_one();
+Return<void> EvsCamera::doneWithFrame(const BufferDesc_1_0& buffer)  {
+    std::lock_guard <std::mutex> lock(mAccessLock);
+    returnBuffer(buffer.bufferId, buffer.memHandle);
+
     return Void();
 }
 
@@ -435,6 +418,319 @@ Return<EvsResult> EvsCamera::setExtendedInfo(uint32_t /*opaqueIdentifier*/, int3
 }
 
 
+Return<void> EvsCamera::getCameraInfo_1_1(getCameraInfo_1_1_cb _hidl_cb)
+{
+    _hidl_cb(mDescription);
+    return Void();
+}
+
+
+Return<void> EvsCamera::getPhysicalCameraInfo(const hidl_string& id, getPhysicalCameraInfo_cb _hidl_cb)
+{
+    if (mDescription.v1.cameraId == id) {
+        _hidl_cb(mDescription);
+    }
+    else {
+        CameraDesc nullDesc;
+        _hidl_cb(nullDesc);
+    }
+    return Void();
+}
+
+
+Return<EvsResult> EvsCamera::pauseVideoStream()
+{
+    mPause = true;
+    return EvsResult::OK;
+}
+
+
+Return<EvsResult> EvsCamera::resumeVideoStream()
+{
+    mPause = false;
+    return EvsResult::OK;
+}
+
+
+Return<EvsResult> EvsCamera::doneWithFrame_1_1(const hidl_vec<BufferDesc_1_1>& buffers)
+{
+    std::lock_guard <std::mutex> lock(mAccessLock);
+
+    for(auto && buffer : buffers) {
+        returnBuffer(buffer.bufferId, buffer.buffer.nativeHandle);
+    }
+
+    return EvsResult::OK;
+}
+
+
+Return<EvsResult> EvsCamera::setMaster()
+{
+    return EvsResult::OK;
+}
+
+
+Return<EvsResult> EvsCamera::forceMaster(const sp<IEvsDisplay_1_0>&)
+{
+    return EvsResult::OK;
+}
+
+
+Return<EvsResult> EvsCamera::unsetMaster()
+{
+    return EvsResult::OK;
+}
+
+
+Return<void> EvsCamera::getParameterList(getParameterList_cb _hidl_cb)
+{
+    v4l2_query_ext_ctrl queryctrl;
+    std::memset (&queryctrl, 0x00, sizeof (queryctrl));
+
+    std::vector<CameraParam> ctrls;
+    for (const auto & [evscid, v4l2cid] : cidmap) {
+        queryctrl.id = v4l2cid;
+        // We don't analyze return code and errno deeply,
+        // because the return type of the function is void.
+        if (ioctl (mFd, VIDIOC_QUERY_EXT_CTRL, &queryctrl) ) {
+            continue;
+        }
+        if ((queryctrl.flags & V4L2_CTRL_FLAG_DISABLED)
+         || (queryctrl.flags & V4L2_CTRL_FLAG_INACTIVE)) {
+            continue;
+        }
+
+        ctrls.push_back (evscid);
+    }
+    std::sort(ctrls.begin(), ctrls.end());
+
+    hidl_vec<CameraParam> hidlCtrls;
+    hidlCtrls.resize(ctrls.size());
+    for (size_t i = 0; i < ctrls.size(); ++i) {
+        hidlCtrls[i] = ctrls[i];
+    }
+
+    _hidl_cb(hidlCtrls);
+    return Void();
+}
+
+
+Return<void> EvsCamera::getIntParameterRange(CameraParam evscid, getIntParameterRange_cb _hidl_cb)
+{
+    v4l2_query_ext_ctrl queryctrl;
+    std::memset (&queryctrl, 0x00, sizeof (queryctrl));
+    queryctrl.id  = cidmap[evscid];
+    uint32_t min  = 0;
+    uint32_t max  = 0;
+    uint32_t step = 0;
+    // Ensure that input evscid is valid!
+    if (cidmap.find(evscid) != cidmap.end()) {
+        // We don't analyze return code and errno deeply,
+        // because the return type of the function is void.
+        if (!(ioctl (mFd, VIDIOC_QUERY_EXT_CTRL, &queryctrl))) {
+            // We don't analyze state (disabled or inactive),
+            // because we must call the cb in any case.
+            min  = queryctrl.minimum;
+            max  = queryctrl.maximum;
+            step = queryctrl.step;
+        }
+    }
+
+    _hidl_cb(min, max, step);
+    return Void();
+}
+
+
+Return<void> EvsCamera::setIntParameter(CameraParam evscid, int32_t value, setIntParameter_cb _hidl_cb)
+{
+    // It is supposed that we are master client.
+
+    hidl_vec<int32_t> values;
+    values.resize(1);
+    if (cidmap.find(evscid) == cidmap.end()) {
+        _hidl_cb(EvsResult::INVALID_ARG, values);
+        return Void();
+    }
+
+    v4l2_query_ext_ctrl queryctrl;
+    std::memset (&queryctrl, 0x00, sizeof (queryctrl));
+    queryctrl.id  = cidmap[evscid];
+    // Ensure that the requested control is available.
+    if (ioctl (mFd, VIDIOC_QUERY_EXT_CTRL, &queryctrl)) {
+        // We don't test the return code because in all possible
+        // cases (EINVAL and EACCESS) we return the same error.
+        _hidl_cb(EvsResult::INVALID_ARG, values);
+        return Void();
+    } else {
+        if (value > queryctrl.minimum
+         || value < queryctrl.maximum
+         ||(value - queryctrl.minimum) % queryctrl.step
+         ||(queryctrl.flags & V4L2_CTRL_FLAG_DISABLED)
+         ||(queryctrl.flags & V4L2_CTRL_FLAG_INACTIVE)) {
+            _hidl_cb(EvsResult::INVALID_ARG, values);
+            return Void();
+         }
+    }
+
+    v4l2_control control {cidmap[evscid], value};
+    int ret = ioctl(mFd, VIDIOC_S_CTRL, &control);
+    if (ret) {
+        EvsResult result = EvsResult::OK;
+        switch (errno) {
+            // EINVAL, ERANGE, EACCES.
+            default:    result = EvsResult::INVALID_ARG; break;
+            case EBUSY: result = EvsResult::UNDERLYING_SERVICE_ERROR;
+        }
+        _hidl_cb(result, values);
+        return Void();
+    }
+
+    ret = ioctl(mFd, VIDIOC_G_CTRL, &control);
+    if (ret) {
+        EvsResult result = EvsResult::OK;
+        switch (errno) {
+            // EINVAL, ERANGE, EACCES.
+            default:    result = EvsResult::INVALID_ARG; break;
+            case EBUSY: result = EvsResult::UNDERLYING_SERVICE_ERROR;
+        }
+        _hidl_cb(result, values);
+        return Void();
+    }
+
+    values[0] = control.value;
+    _hidl_cb(EvsResult::OK, values);
+    return Void();
+}
+
+
+Return<void> EvsCamera::getIntParameter(CameraParam evscid, getIntParameter_cb _hidl_cb)
+{
+    hidl_vec<int32_t> values;
+    values.resize(1);
+    if (cidmap.find(evscid) == cidmap.end()) {
+        _hidl_cb(EvsResult::INVALID_ARG, values);
+        return Void();
+    }
+
+    v4l2_query_ext_ctrl queryctrl;
+    std::memset (&queryctrl, 0x00, sizeof (queryctrl));
+    queryctrl.id  = cidmap[evscid];
+    // Ensure that the requested control is available.
+    if (ioctl (mFd, VIDIOC_QUERY_EXT_CTRL, &queryctrl)) {
+        // We don't test the return code because in all possible
+        // cases (EINVAL and EACCESS) we return the same error.
+        _hidl_cb(EvsResult::INVALID_ARG, values);
+        return Void();
+    }
+
+    v4l2_control control {cidmap[evscid], 0};
+    int ret = ioctl(mFd, VIDIOC_G_CTRL, &control);
+    if (ret) {
+        EvsResult result = EvsResult::OK;
+        switch (errno) {
+            // EINVAL, ERANGE, EACCES.
+            default:    result = EvsResult::INVALID_ARG; break;
+            case EBUSY: result = EvsResult::UNDERLYING_SERVICE_ERROR;
+        }
+        _hidl_cb(result, values);
+        return Void();
+    }
+
+    values[0] = control.value;
+    _hidl_cb(EvsResult::OK, values);
+    return Void();
+}
+
+
+Return<EvsResult> EvsCamera::setExtendedInfo_1_1(uint32_t id, const hidl_vec<uint8_t>& value)
+{
+    mExtInfo.insert_or_assign(id, value);
+    return EvsResult::OK;
+}
+
+
+Return<void> EvsCamera::getExtendedInfo_1_1(uint32_t id, getExtendedInfo_1_1_cb _hidl_cb)
+{
+    const auto it = mExtInfo.find(id);
+    hidl_vec<uint8_t> value;
+    auto status = EvsResult::OK;
+    if (it == mExtInfo.end()) {
+        status = EvsResult::INVALID_ARG;
+    } else {
+        value = mExtInfo[id];
+    }
+
+    _hidl_cb(status, value);
+    return Void();
+}
+
+
+Return<void> EvsCamera::importExternalBuffers(const hidl_vec<BufferDesc_1_1>& buffers, importExternalBuffers_cb _hidl_cb)
+{
+    auto numBuffersToAdd = buffers.size();
+    if (numBuffersToAdd < 1) {
+        ALOGI("No buffers to add.");
+        _hidl_cb(EvsResult::OK, mFramesAllowed);
+        return Void();
+    }
+
+    {
+        std::scoped_lock<std::mutex> lock(mAccessLock);
+
+        if (numBuffersToAdd > (MAX_BUFFERS_IN_FLIGHT - mFramesAllowed)) {
+            numBuffersToAdd -= (MAX_BUFFERS_IN_FLIGHT - mFramesAllowed);
+            ALOGW("Exceed the limit on number of buffers. %zu buffers will be added only.", numBuffersToAdd);
+        }
+
+        GraphicBufferMapper& mapper = GraphicBufferMapper::get();
+        const auto before = mFramesAllowed;
+        for (auto i = 0; i < numBuffersToAdd; ++i) {
+            // TODO: reject if external buffer is configured differently.
+            auto& b = buffers[i];
+            const AHardwareBuffer_Desc* pDesc =
+                reinterpret_cast<const AHardwareBuffer_Desc *>(&b.buffer.description);
+
+            // Import a buffer to add
+            buffer_handle_t memHandle = nullptr;
+            status_t result = mapper.importBuffer(b.buffer.nativeHandle,
+                                                  pDesc->width,
+                                                  pDesc->height,
+                                                  1,
+                                                  pDesc->format,
+                                                  pDesc->usage,
+                                                  pDesc->stride,
+                                                  &memHandle);
+            if (result != android::NO_ERROR || !memHandle) {
+                ALOGW("Failed to import a buffer %d.", b.bufferId);
+                continue;
+            }
+
+            auto stored = false;
+            for (auto&& rec : mBuffers) {
+                if (rec.handle == nullptr) {
+                    // Use this existing entry
+                    rec.handle = memHandle;
+                    rec.inUse = false;
+
+                    stored = true;
+                    break;
+                }
+            }
+
+            if (!stored) {
+                // Add a BufferRecord wrapping this handle to our set of available buffers
+                mBuffers.emplace_back(memHandle);
+            }
+
+            ++mFramesAllowed;
+        }
+
+        _hidl_cb(EvsResult::OK, mFramesAllowed - before);
+        return {};
+    }
+}
+
+
 bool EvsCamera::setAvailableFrames_Locked(unsigned bufferCount) {
     if (bufferCount < 1) {
         ALOGE("Ignoring request to set buffer count to zero");
@@ -488,9 +784,7 @@ unsigned EvsCamera::increaseAvailableFrames_Locked(unsigned numToAdd) {
 
     while (added < numToAdd) {
         buffer_handle_t memHandle = nullptr;
-        status_t result = alloc.allocate(mWidth, mHeight,
-                                         mFormat, 1,
-                                         mUsage,
+        status_t result = alloc.allocate(mWidth, mHeight, mFormat, 1, mUsage,
                                          &memHandle, &mStride, 0, "EvsCamera");
         if (result != NO_ERROR) {
             ALOGE("Error %d allocating %d x %d graphics buffer", result, mWidth, mHeight);
@@ -590,21 +884,32 @@ void EvsCamera::generateFrames() {
                 break;
             }
 
-            BufferDesc buff = {
-                .width      = mWidth,
-                .height     = mHeight,
-                .stride     = mStride,
-                .pixelSize  = BYTES_PER_PIXEL,
-                .format     = HAL_PIXEL_FORMAT_RGBA_8888,
-                .usage      = mUsage,
-                .bufferId   = (uint32_t) idx,
-                .memHandle  = mBuffers[idx].handle
-            };
+            if(mPause) {
+                queueBuffer(idx);
+                continue;
+            }
+
+            BufferDesc_1_1 buff_1_1 = {};
+            AHardwareBuffer_Desc * pDesc = reinterpret_cast<AHardwareBuffer_Desc *>(&buff_1_1.buffer.description);
+            pDesc->width  = mWidth;
+            pDesc->height = mHeight;
+            pDesc->layers = 1;
+            pDesc->format = HAL_PIXEL_FORMAT_RGBA_8888;
+            pDesc->usage  = mUsage;
+            pDesc->stride = mStride;
+            buff_1_1.buffer.nativeHandle = mBuffers[idx].handle;
+            buff_1_1.pixelSize = BYTES_PER_PIXEL;
+            buff_1_1.bufferId = idx;
+            buff_1_1.deviceId = mDescription.v1.cameraId;
+            buff_1_1.timestamp = elapsedRealtimeNano();
 
             mBuffers[idx].inUse = true;
 
-            // Issue the (asynchronous) callback to the client -- can't be holding the lock
-            auto result = mStream->deliverFrame(buff);
+            // Issue the (asynchronous) callback to the client -- can't be holding the locka
+            hidl_vec<BufferDesc_1_1> frames;
+            frames.resize(1);
+            frames[0] = buff_1_1;
+            auto result = mStream->deliverFrame_1_1(frames);
 
             if (!result.isOk()) {
                 // This can happen if the client dies and is likely unrecoverable.
@@ -623,16 +928,51 @@ void EvsCamera::generateFrames() {
         }
     }
 
-    // If we've been asked to stop, send one last NULL frame to signal the actual end of stream
-    BufferDesc nullBuff = {};
-    ALOGE("Delivering end of stream marker");
-    auto result = mStream->deliverFrame(nullBuff);
+    // If we've been asked to stop, send an event to signal the actual end of stream
+    EvsEventDesc event {EvsEventType::STREAM_STOPPED, mDescription.v1.cameraId, {} };
+    ALOGE("Notifying end of stream event.");
+    auto result = mStream->notify(event);
 
     if (!result.isOk()) {
         ALOGE("Error delivering end of stream marker");
     }
     return;
 }
+
+
+void EvsCamera::returnBuffer(uint32_t bufferId, buffer_handle_t memHandle)
+{
+    if (memHandle == nullptr) {
+        ALOGE("ignoring doneWithFrame called with null handle");
+    } else if (bufferId >= mBuffers.size()) {
+        ALOGE("ignoring doneWithFrame called with invalid bufferId %d (max is %zu)",
+              bufferId, mBuffers.size()-1);
+    } else if (!mBuffers[bufferId].inUse) {
+        ALOGE("ignoring doneWithFrame called on frame %d which is already free",
+              bufferId);
+    } else {
+        if(mFramesAllowed <= 0 || mFramesInUse <= 0) {
+            // Should never happen
+            ALOGE("Error in doneWithFrame(). Received a frame when no frames were allowed or in use.");
+            return;
+        }
+        if(mStreamState == STOPPED) {
+            //Release buffer that was in use
+            GraphicBufferAllocator &alloc(GraphicBufferAllocator::get());
+            alloc.free(mBuffers[bufferId].handle);
+            mBuffers[bufferId].handle = nullptr;
+            mFramesAllowed--;
+        } else {
+            // Mark the frame as available
+            queueBuffer(bufferId);
+            mBuffers[bufferId].inUse = false;
+        }
+        mFramesInUse--;
+    }
+
+    mBufferCond.notify_one();
+}
+
 
 int EvsCamera::dequeueBuffer() {
     int ret = android::NO_ERROR;
@@ -693,7 +1033,7 @@ void EvsCamera::queueBuffer(int idx) {
 }
 
 } // namespace renesas
-} // namespace V1_0
+} // namespace V1_1
 } // namespace evs
 } // namespace automotive
 } // namespace hardware

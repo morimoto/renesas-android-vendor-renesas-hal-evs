@@ -1,0 +1,12 @@
+service vendor.evs-1-1 /vendor/bin/hw/android.hardware.automotive.evs@1.1-service.renesas ${ro.hardware}
+    interface android.hardware.automotive.evs@1.1::IEvsEnumerator EvsEnumeratorHw
+    interface android.hardware.automotive.evs@1.0::IEvsEnumerator EvsEnumeratorHw
+    priority -20
+    class early_hal
+    user automotive_evs
+    group automotive_evs
+    shutdown critical
+    disabled # will start explicitly, when binders became ready
+
+on coldboot_done
+    start vendor.evs-1-1

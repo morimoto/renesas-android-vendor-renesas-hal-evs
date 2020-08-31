@@ -25,12 +25,15 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <ui/DisplayConfig.h>
+#include <ui/DisplayState.h>
+
 
 namespace android {
 namespace hardware {
 namespace automotive {
 namespace evs {
-namespace V1_0 {
+namespace V1_1 {
 namespace renesas {
 
 
@@ -39,9 +42,11 @@ namespace renesas {
 //        constructs a new instance for each client.
 std::list<EvsEnumerator::CameraRecord>   EvsEnumerator::sCameraList;
 wp<EvsDisplay>                           EvsEnumerator::sActiveDisplay;
+sp<IAutomotiveDisplayProxyService>       EvsEnumerator::sDisplayProxyService;
+std::unordered_map<uint8_t, uint64_t>    EvsEnumerator::sDisplayPortList;
 
 
-EvsEnumerator::EvsEnumerator(Platform platform) {
+EvsEnumerator::EvsEnumerator(Platform platform, sp<IAutomotiveDisplayProxyService> windowService) {
     ALOGD("EvsEnumerator created");
 
     switch (platform) {
@@ -60,6 +65,12 @@ EvsEnumerator::EvsEnumerator(Platform platform) {
             ALOGE("Unknown hardware environment!");
             break;
     }
+
+    if (sDisplayProxyService == nullptr) {
+        sDisplayProxyService = windowService;
+    }
+
+    enumerateDisplays();
 }
 
 
@@ -146,11 +157,13 @@ bool EvsEnumerator::enumerateCamerasSalvator() {
     const char *subdev_name = "/dev/v4l-subdev2";
     if( (fd = open(subdev_name, O_RDWR)) == -1) {
         ALOGE("Error while opening device %s: %s", subdev_name, strerror(errno));
+        close(fd);
         return false;
     }
 
     if (ioctl(fd, VIDIOC_SUBDEV_G_FMT, &sub_format) < 0) {
         ALOGE("%s VIDIOC_SUBDEV_G_FMT: %s", subdev_name, strerror(errno));
+        close(fd);
         return false;
     }
     close(fd);
@@ -197,7 +210,27 @@ bool EvsEnumerator::enumerateCamerasSalvator() {
         }
         close(fd);
 
-        sCameraList.emplace_back("/dev/video0", sub_format.format.width, sub_format.format.height);
+        const uint32_t data [] {
+                0
+              , sub_format.format.width
+              , sub_format.format.height
+              , HAL_PIXEL_FORMAT_RGBA_8888
+              , ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT
+              , 30};
+        camera_metadata_t * metadata = allocate_camera_metadata(/*entrys*/1
+              , calculate_camera_metadata_entry_data_size(
+                    get_camera_metadata_tag_type(ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS)
+                  , sizeof(data)) );
+        const int32_t err = add_camera_metadata_entry(metadata
+              , ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS
+              , data, sizeof(data));
+
+        if (err) {
+            metadata = nullptr;
+            ALOGW("Failed to prepare metadata entry, ignored.");
+        }
+
+        sCameraList.emplace_back(metadata, "/dev/video0", sub_format.format.width, sub_format.format.height);
     } else {
         ALOGD("No camera found with %s", subdev_name);
         return false;
@@ -339,6 +372,36 @@ bool EvsEnumerator::enumerateCamerasKingfisher() {
 }
 
 
+void EvsEnumerator::enumerateDisplays() {
+    if (sDisplayProxyService != nullptr) {
+        // Get a display ID list.
+        sDisplayProxyService->getDisplayIdList([](const auto& displayIds) {
+            for (const auto& id : displayIds) {
+                const auto port = id & 0xFF;
+                sDisplayPortList.insert_or_assign(port, id);
+                sDisplayProxyService->getDisplayInfo(id, [=](const auto& cfg, const auto& state) {
+                    android::DisplayConfig* pConfig = (android::DisplayConfig*)cfg.data();
+                    android::ui::DisplayState* pState = (android::ui::DisplayState*)state.data();
+                    ALOGI("Found display. Id: %lu, Port: %d, "
+                          "Resolution: %ux%u (viewport: %ux%u), Orientation: %s, Dpi: %f/%f, "
+                          "Refresh: %f, VsyncOff: %lu/%lu, LayerStack: %u, Pdl: %lu, CfgGroup: %d."
+                          , id, int (port)
+                          , pConfig->resolution.getWidth(), pConfig->resolution.getHeight()
+                          , pState->viewport.getWidth(), pState->viewport.getHeight()
+                          , android::ui::toCString(pState->orientation)
+                          , pConfig->xDpi, pConfig->yDpi
+                          , pConfig->refreshRate
+                          , pConfig->appVsyncOffset, pConfig->sfVsyncOffset
+                          , pState->layerStack
+                          , pConfig->presentationDeadline
+                          , pConfig->configGroup);
+                });
+            }
+        });
+    }
+}
+
+
 // Methods from ::android::hardware::automotive::evs::V1_0::IEvsEnumerator follow.
 Return<void> EvsEnumerator::getCameraList(getCameraList_cb _hidl_cb)  {
     ALOGD("getCameraList");
@@ -346,11 +409,11 @@ Return<void> EvsEnumerator::getCameraList(getCameraList_cb _hidl_cb)  {
     const unsigned numCameras = sCameraList.size();
 
     // Build up a packed array of CameraDesc for return
-    hidl_vec<CameraDesc> hidlCameras;
+    hidl_vec<CameraDesc_1_0> hidlCameras;
     hidlCameras.resize(numCameras);
     unsigned i = 0;
     for (const auto& cam : sCameraList) {
-        hidlCameras[i++] = cam.desc;
+        hidlCameras[i++] = cam.desc.v1;
     }
 
     // Send back the results
@@ -362,7 +425,7 @@ Return<void> EvsEnumerator::getCameraList(getCameraList_cb _hidl_cb)  {
 }
 
 
-Return<sp<IEvsCamera>> EvsEnumerator::openCamera(const hidl_string& cameraId) {
+Return<sp<IEvsCamera_1_0>> EvsEnumerator::openCamera(const hidl_string& cameraId) {
     ALOGD("openCamera");
 
     // Is this a recognized camera id?
@@ -390,18 +453,19 @@ Return<sp<IEvsCamera>> EvsEnumerator::openCamera(const hidl_string& cameraId) {
 }
 
 
-Return<void> EvsEnumerator::closeCamera(const ::android::sp<IEvsCamera>& pCamera) {
+Return<void> EvsEnumerator::closeCamera(const ::android::sp<IEvsCamera_1_0>& pCamera) {
     ALOGD("closeCamera");
 
-    if (pCamera == nullptr) {
+    auto pCamera_1_1 = IEvsCamera::castFrom(pCamera).withDefault(nullptr);
+    if (pCamera_1_1 == nullptr) {
         ALOGE("Ignoring call to closeCamera with null camera ptr");
         return Void();
     }
 
     // Get the camera id so we can find it in our list
     std::string cameraId;
-    pCamera->getCameraInfo([&cameraId](CameraDesc desc) {
-                               cameraId = desc.cameraId;
+    pCamera_1_1->getCameraInfo_1_1([&cameraId](CameraDesc desc) {
+                                     cameraId = desc.v1.cameraId;
                            }
     );
 
@@ -416,7 +480,7 @@ Return<void> EvsEnumerator::closeCamera(const ::android::sp<IEvsCamera>& pCamera
 
         if (pActiveCamera == nullptr) {
             ALOGE("Somehow a camera is being destroyed when the enumerator didn't know one existed");
-        } else if (pActiveCamera != pCamera) {
+        } else if (pActiveCamera != pCamera_1_1) {
             // This can happen if the camera was aggressively reopened, orphaning this previous instance
             ALOGW("Ignoring close of previously orphaned camera - why did a client steal?");
         } else {
@@ -430,7 +494,7 @@ Return<void> EvsEnumerator::closeCamera(const ::android::sp<IEvsCamera>& pCamera
 }
 
 
-Return<sp<IEvsDisplay>> EvsEnumerator::openDisplay() {
+Return<sp<IEvsDisplay_1_0>> EvsEnumerator::openDisplay() {
     ALOGD("openDisplay");
 
     // If we already have a display active, then we need to shut it down so we can
@@ -450,7 +514,7 @@ Return<sp<IEvsDisplay>> EvsEnumerator::openDisplay() {
 }
 
 
-Return<void> EvsEnumerator::closeDisplay(const ::android::sp<IEvsDisplay>& pDisplay) {
+Return<void> EvsEnumerator::closeDisplay(const ::android::sp<IEvsDisplay_1_0>& pDisplay) {
     ALOGD("closeDisplay");
 
     // Do we still have a display object we think should be active?
@@ -481,10 +545,123 @@ Return<DisplayState> EvsEnumerator::getDisplayState()  {
     }
 }
 
+
+// Methods from ::android::hardware::automotive::evs::V1_1::IEvsEnumerator follow.
+Return<void> EvsEnumerator::getCameraList_1_1(getCameraList_1_1_cb _hidl_cb)
+{
+    ALOGD("getCameraList_1_1");
+    const unsigned numCameras = sCameraList.size();
+    std::vector<CameraDesc_1_1> descriptions;
+    descriptions.reserve(numCameras);
+    for (const auto& cam : sCameraList) {
+        descriptions.push_back(cam.desc);
+    }
+    hidl_vec<CameraDesc_1_1> hidlDescriptions(descriptions);
+    ALOGD("Reporting %zu cameras available.", hidlDescriptions.size());
+    _hidl_cb(hidlDescriptions);
+    return Void();
+}
+
+
+Return<sp<IEvsCamera_1_1>> EvsEnumerator::openCamera_1_1(const hidl_string& cameraId, const Stream& config)
+{
+    ALOGD("openCamera_1_1");
+
+    // Is this a recognized camera id?
+    CameraRecord *pRecord = findCameraById(cameraId);
+    if (!pRecord) {
+        ALOGE("Requested camera %s not found", cameraId.c_str());
+        return nullptr;
+    }
+
+    // Has this camera already been instantiated by another caller?
+    sp<EvsCamera> pActiveCamera = pRecord->activeInstance.promote();
+    if (pActiveCamera != nullptr) {
+        ALOGW("Killing previous camera because of new caller");
+        closeCamera(pActiveCamera);
+    }
+
+    // Construct a camera instance for the caller
+    pActiveCamera = new EvsCamera(cameraId.c_str(), config);
+    pRecord->activeInstance = pActiveCamera;
+    if (pActiveCamera == nullptr) {
+        ALOGE("Failed to allocate new EvsCamera object for %s\n", cameraId.c_str());
+    }
+
+    return pActiveCamera;
+}
+
+
+Return<void> EvsEnumerator::getDisplayIdList(getDisplayIdList_cb _hidl_cb)
+{
+    hidl_vec<uint8_t> ids;
+    ids.resize(sDisplayPortList.size());
+
+    int i = 0;
+    sp<EvsDisplay> pActiveDisplay = sActiveDisplay.promote();
+    bool isActive = false;
+    if (pActiveDisplay) {
+        isActive = true;
+        ids[i++] = pActiveDisplay->getDisplayId() & 0xFF;
+    }
+
+    for (const auto & [port, id] : sDisplayPortList) {
+        if (isActive && id == ids[0]) {
+            continue;
+        }
+        ids[i++] = port;
+    }
+
+    _hidl_cb(ids);
+    return Void();
+}
+
+
+Return<sp<IEvsDisplay_1_1>> EvsEnumerator::openDisplay_1_1(uint8_t port)
+{
+    ALOGD("openDisplay_1_1");
+
+    // If we already have a display active, then we need to shut it down so we can
+    // give exclusive access to the new caller.
+    sp<EvsDisplay> pActiveDisplay = sActiveDisplay.promote();
+    if (pActiveDisplay != nullptr) {
+        ALOGW("Killing previous display because of new caller");
+        closeDisplay(pActiveDisplay);
+    }
+
+    // Create a new display interface and return it
+    pActiveDisplay = new EvsDisplay(sDisplayProxyService, sDisplayPortList[port]);
+    sActiveDisplay = pActiveDisplay;
+
+    ALOGD("Returning new EvsDisplay object %p", pActiveDisplay.get());
+    return pActiveDisplay;
+}
+
+
+Return<void> EvsEnumerator::getUltrasonicsArrayList(getUltrasonicsArrayList_cb _hidl_cb)
+{
+    hidl_vec<UltrasonicsArrayDesc> nullValue;
+    _hidl_cb(nullValue);
+    return Void();
+}
+
+
+Return<sp<IEvsUltrasonicsArray>> EvsEnumerator::openUltrasonicsArray(const hidl_string&)
+{
+    return nullptr;
+}
+
+
+Return<void> EvsEnumerator::closeUltrasonicsArray(const sp<IEvsUltrasonicsArray>&)
+{
+    return Void();
+}
+
+
 EvsEnumerator::CameraRecord* EvsEnumerator::findCameraById(const std::string& cameraId) {
     // Find the named camera
     for (auto &&cam : sCameraList) {
-        if (cam.desc.cameraId == cameraId) {
+        if (cam.desc.v1.cameraId == cameraId) {
             // Found a match!
             return &cam;
         }
@@ -495,7 +672,7 @@ EvsEnumerator::CameraRecord* EvsEnumerator::findCameraById(const std::string& ca
 }
 
 } // namespace renesas
-} // namespace V1_0
+} // namespace V1_1
 } // namespace evs
 } // namespace automotive
 } // namespace hardware

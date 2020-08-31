@@ -2,10 +2,6 @@
     <hal format="hidl">
         <name>android.hardware.automotive.evs</name>
         <transport>hwbinder</transport>
-        <version>1.0</version>
-        <interface>
-            <name>IEvsEnumerator</name>
-            <instance>EvsEnumeratorHw</instance>
-        </interface>
+        <fqname>@1.1::IEvsEnumerator/EvsEnumeratorHw</fqname>
     </hal>
 </manifest>

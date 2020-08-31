@@ -18,17 +18,21 @@
 #ifndef VENDOR_RENESAS_HAL_EVS_EVSENUMERATOR_H
 #define VENDOR_RENESAS_HAL_EVS_EVSENUMERATOR_H
 
-#include <android/hardware/automotive/evs/1.0/IEvsEnumerator.h>
-#include <android/hardware/automotive/evs/1.0/IEvsCamera.h>
+#include <android/hardware/automotive/evs/1.1/IEvsEnumerator.h>
+#include <android/hardware/automotive/evs/1.1/IEvsCamera.h>
+#include <android/frameworks/automotive/display/1.0/IAutomotiveDisplayProxyService.h>
+#include <android/hardware/automotive/evs/1.1/IEvsUltrasonicsArray.h>
 
 #include <list>
+#include <unordered_map>
+#include <system/camera_metadata.h>
 
 
 namespace android {
 namespace hardware {
 namespace automotive {
 namespace evs {
-namespace V1_0 {
+namespace V1_1 {
 namespace renesas {
 
 
@@ -43,23 +47,43 @@ enum class Platform {
 };
 
 
+using ::android::hardware::automotive::evs::V1_0::DisplayState;
+using IEvsCamera_1_0 = ::android::hardware::automotive::evs::V1_0::IEvsCamera;
+using IEvsCamera_1_1 = ::android::hardware::automotive::evs::V1_1::IEvsCamera;
+using CameraDesc_1_0 = ::android::hardware::automotive::evs::V1_0::CameraDesc;
+using CameraDesc_1_1 = ::android::hardware::automotive::evs::V1_1::CameraDesc;
+using IEvsDisplay_1_0 = ::android::hardware::automotive::evs::V1_0::IEvsDisplay;
+using IEvsDisplay_1_1 = ::android::hardware::automotive::evs::V1_1::IEvsDisplay;
+using ::android::frameworks::automotive::display::V1_0::IAutomotiveDisplayProxyService;
+using ::android::hardware::camera::device::V3_2::Stream;
+
+
 class EvsEnumerator : public IEvsEnumerator {
 public:
     // Methods from ::android::hardware::automotive::evs::V1_0::IEvsEnumerator follow.
     Return<void> getCameraList(getCameraList_cb _hidl_cb)  override;
-    Return<sp<IEvsCamera>> openCamera(const hidl_string& cameraId) override;
-    Return<void> closeCamera(const ::android::sp<IEvsCamera>& carCamera)  override;
-    Return<sp<IEvsDisplay>> openDisplay()  override;
-    Return<void> closeDisplay(const ::android::sp<IEvsDisplay>& display)  override;
+    Return<sp<IEvsCamera_1_0>> openCamera(const hidl_string& cameraId) override;
+    Return<void> closeCamera(const ::android::sp<IEvsCamera_1_0>& carCamera)  override;
+    Return<sp<IEvsDisplay_1_0>> openDisplay()  override;
+    Return<void> closeDisplay(const ::android::sp<IEvsDisplay_1_0>& display)  override;
     Return<DisplayState> getDisplayState()  override;
+    // Methods from ::android::hardware::automotive::evs::V1_1::IEvsEnumerator follow.
+    Return<void> getCameraList_1_1(getCameraList_1_1_cb) override;
+    Return<sp<IEvsCamera_1_1>> openCamera_1_1(const hidl_string&, const Stream&) override;
+    Return<bool> isHardware() override {return true;}
+    Return<void> getDisplayIdList(getDisplayIdList_cb) override;
+    Return<sp<IEvsDisplay_1_1>> openDisplay_1_1(uint8_t) override;
+    Return<void> getUltrasonicsArrayList(getUltrasonicsArrayList_cb) override;
+    Return<sp<IEvsUltrasonicsArray>> openUltrasonicsArray(const hidl_string&) override;
+    Return<void> closeUltrasonicsArray(const sp<IEvsUltrasonicsArray>&) override;
 
     // Implementation details
-    EvsEnumerator(Platform);
+    EvsEnumerator(Platform, sp<IAutomotiveDisplayProxyService> windowService = nullptr);
     ~EvsEnumerator () override = default;
 
 private:
     struct CameraRecord {
-        CameraDesc desc;
+        CameraDesc_1_1 desc;
         wp<EvsCamera> activeInstance;
 
         struct Dim {
@@ -67,10 +91,17 @@ private:
             uint32_t height{0};
         } dim;
 
-        CameraRecord(const char *cameraId, uint32_t width, uint32_t height) : desc(){
-            desc.cameraId = cameraId;
+        CameraRecord(camera_metadata_t const * meta, const char *cameraId, uint32_t width, uint32_t height) {
+            desc.v1.cameraId = cameraId;
             dim.width = width;
             dim.height = height;
+            if (meta) {
+                desc.metadata.setToExternal((uint8_t *)meta, get_camera_metadata_size(meta));
+            }
+        }
+
+        CameraRecord(const char *cameraId, uint32_t width, uint32_t height)
+            : CameraRecord(nullptr, cameraId, width, height) {
         }
     };
 
@@ -85,10 +116,15 @@ private:
 
     static bool enumerateCamerasSalvator();
     static bool enumerateCamerasKingfisher();
+    static void enumerateDisplays();
+
+    static sp<IAutomotiveDisplayProxyService> sDisplayProxyService;
+    static std::unordered_map<uint8_t,
+                              uint64_t> sDisplayPortList;
 };
 
 } // namespace renesas
-} // namespace V1_0
+} // namespace V1_1
 } // namespace evs
 } // namespace automotive
 } // namespace hardware

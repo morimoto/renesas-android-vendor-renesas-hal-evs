@@ -1,4 +1,5 @@
 /*
+ * Copyright (C) 2020 GlobalLogic
  * Copyright (C) 2016 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,8 +17,6 @@
 
 #define LOG_TAG "EvsHAL"
 
-#include <unistd.h>
-
 #include <hidl/HidlTransportSupport.h>
 #include <utils/Errors.h>
 #include <utils/StrongPointer.h>
@@ -25,7 +24,6 @@
 
 #include "ServiceNames.h"
 #include "EvsEnumerator.h"
-#include "EvsDisplay.h"
 
 #include <vendor/renesas/graphics/composer/2.0/IComposer.h>
 
@@ -34,14 +32,14 @@ using android::hardware::configureRpcThreadpool;
 using android::hardware::joinRpcThreadpool;
 
 // Generated HIDL files
-using android::hardware::automotive::evs::V1_0::IEvsEnumerator;
-using android::hardware::automotive::evs::V1_0::IEvsDisplay;
+using android::hardware::automotive::evs::V1_1::IEvsEnumerator;
 
 // The namespace in which all our implementation code lives
-using namespace android::hardware::automotive::evs::V1_0::renesas;
+using namespace android::hardware::automotive::evs::V1_1::renesas;
 using namespace android;
 
 using vendor::renesas::graphics::composer::V2_0::IComposer;
+using android::frameworks::automotive::display::V1_0::IAutomotiveDisplayProxyService;
 
 int main(int argc, char ** argv) {
     Platform platform = Platform::Unknown;
@@ -54,8 +52,11 @@ int main(int argc, char ** argv) {
         }
     }
 
+    ALOGI("Waiting for IComposer service...");
     sp<IComposer> composer = IComposer::getService();
-    android::sp<IEvsEnumerator> service = new EvsEnumerator(platform);
+    ALOGI("Waiting for IAutomotiveDisplayProxyService service...");
+    sp<IAutomotiveDisplayProxyService> windowService = IAutomotiveDisplayProxyService::getService();
+    android::sp<IEvsEnumerator> service = new EvsEnumerator(platform, windowService);
 
     configureRpcThreadpool(1, true /* callerWillJoin */);
 

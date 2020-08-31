@@ -23,16 +23,20 @@
 #include <hardware/gralloc1.h>
 #include <img_gralloc_common_public.h>
 #include <cmath>
+#include <ui/DisplayConfig.h>
+#include <ui/DisplayState.h>
 
 #include <vendor/renesas/graphics/composer/2.0/IComposer.h>
 
+using android::frameworks::automotive::display::V1_0::HwDisplayConfig;
+using android::frameworks::automotive::display::V1_0::HwDisplayState;
 using vendor::renesas::graphics::composer::V2_0::IComposer;
 
 namespace android {
 namespace hardware {
 namespace automotive {
 namespace evs {
-namespace V1_0 {
+namespace V1_1 {
 namespace renesas {
 
 
@@ -41,10 +45,15 @@ namespace renesas {
 #define BUFFER_FORMAT HAL_PIXEL_FORMAT_BGRX_8888
 #define BUFFER_USAGE (GRALLOC1_PRODUCER_USAGE_GPU_RENDER_TARGET | GRALLOC1_PRODUCER_USAGE_CPU_WRITE_OFTEN)
 
-EvsDisplay::EvsDisplay() {
+EvsDisplay::EvsDisplay()
+    : EvsDisplay(nullptr, 0) {
+}
+
+EvsDisplay::EvsDisplay(sp<IAutomotiveDisplayProxyService> pDisplayProxy, uint64_t displayId)
+    : mDisplayProxy(pDisplayProxy),
+      mDisplayId(displayId) {
     ALOGD("EvsDisplay instantiated");
     init();
-
 }
 
 EvsDisplay::~EvsDisplay() {
@@ -277,8 +286,20 @@ Return<EvsResult> EvsDisplay::returnTargetBufferForDisplay(const BufferDesc& buf
     return EvsResult::OK;
 }
 
+Return<void> EvsDisplay::getDisplayInfo_1_1(getDisplayInfo_1_1_cb _hidl_cb)
+{
+    if (mDisplayProxy != nullptr) {
+        return mDisplayProxy->getDisplayInfo(mDisplayId, _hidl_cb);
+    } else {
+        HwDisplayConfig nullConfig;
+        HwDisplayState  nullState;
+        _hidl_cb(nullConfig, nullState);
+        return Void();
+    }
+}
+
 } // namespace renesas
-} // namespace V1_0
+} // namespace V1_1
 } // namespace evs
 } // namespace automotive
 } // namespace hardware
