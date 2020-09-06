@@ -89,6 +89,22 @@ bool EvsCamera::initialize(const char* deviceName)
         return false;
     }
 
+    // Set the clipping area
+    v4l2_crop crop = {};
+    crop.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    crop.c.width = mWidth;
+    crop.c.height = mHeight;
+    crop.c.left = 0;
+    crop.c.top = 0;
+
+    ALOGI("Requesting clipping t=%u l=%u w=%u h=%u",
+            crop.c.top, crop.c.left, crop.c.width, crop.c.height);
+
+    if (ioctl(mFd, VIDIOC_S_CROP, &crop) < 0) {
+        ALOGE("VIDIOC_S_CROP: %s", strerror(errno));
+        return false;
+    }
+
     // Set our desired output format
     v4l2_format format = {};
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
