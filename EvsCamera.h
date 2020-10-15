@@ -81,8 +81,9 @@ public:
     Return<void> importExternalBuffers(const hidl_vec<BufferDesc_1_1>&, importExternalBuffers_cb) override;
 
     // Implementation details
+    EvsCamera(const char *id, const hidl_vec<uint8_t> *, uint32_t initWidth, uint32_t initHeight);
     EvsCamera(const char *id, uint32_t initWidth, uint32_t initHeight);
-    EvsCamera(const char *id, const Stream&);
+    EvsCamera(const char *id, const hidl_vec<uint8_t> *, const Stream&);
     ~EvsCamera() override;
     void shutdown();
     bool initialize(const char* deviceName);

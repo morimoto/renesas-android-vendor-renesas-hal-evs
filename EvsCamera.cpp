@@ -56,7 +56,7 @@ static std::unordered_map <CameraParam, uint32_t> cidmap {
   , {CameraParam::ABSOLUTE_ZOOM, V4L2_CID_ZOOM_ABSOLUTE}
 };
 
-EvsCamera::EvsCamera(const char *id, uint32_t initWidth, uint32_t initHeight) :
+EvsCamera::EvsCamera(const char *id, const hidl_vec<uint8_t> * metadata, uint32_t initWidth, uint32_t initHeight) :
         mFramesAllowed(0),
         mFramesInUse(0),
         mStreamState(STOPPED),
@@ -67,6 +67,13 @@ EvsCamera::EvsCamera(const char *id, uint32_t initWidth, uint32_t initHeight) :
     ALOGD("EvsCamera instantiated");
 
     mDescription.v1.cameraId = id;
+
+    if (metadata) {
+        mDescription.metadata.resize(metadata->size());
+        for (size_t i = 0; i < metadata->size(); ++i) {
+            mDescription.metadata[i] = (*metadata)[i];
+        }
+    }
     mWidth  = initWidth;
     mHeight = initHeight;
     mFormat = BUFFER_FORMAT;
@@ -78,8 +85,13 @@ EvsCamera::EvsCamera(const char *id, uint32_t initWidth, uint32_t initHeight) :
 }
 
 
-EvsCamera::EvsCamera(const char *id, const Stream& config) :
-        EvsCamera(id, config.width, config.height) {
+EvsCamera::EvsCamera(const char *id, uint32_t initWidth, uint32_t initHeight) :
+        EvsCamera(id, nullptr, initWidth, initHeight) {
+}
+
+
+EvsCamera::EvsCamera(const char *id, const hidl_vec<uint8_t> * metadata, const Stream& config) :
+        EvsCamera(id, metadata, config.width, config.height) {
 }
 
 
