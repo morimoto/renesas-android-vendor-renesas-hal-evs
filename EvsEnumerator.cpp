@@ -46,6 +46,16 @@ sp<IAutomotiveDisplayProxyService>       EvsEnumerator::sDisplayProxyService;
 std::unordered_map<uint8_t, uint64_t>    EvsEnumerator::sDisplayPortList;
 
 
+EvsEnumerator::CameraRecord::CameraRecord(camera_metadata_t const * meta, const char *cameraId, uint32_t width, uint32_t height) {
+    desc.v1.cameraId = cameraId;
+    dim.width = width;
+    dim.height = height;
+    if (meta) {
+        desc.metadata.setToExternal((uint8_t *)meta, get_camera_metadata_size(meta));
+    }
+}
+
+
 EvsEnumerator::EvsEnumerator(Platform platform, sp<IAutomotiveDisplayProxyService> windowService) {
     ALOGD("EvsEnumerator created");
 
@@ -210,27 +220,10 @@ bool EvsEnumerator::enumerateCamerasSalvator() {
         }
         close(fd);
 
-        const uint32_t data [] {
-                0
-              , sub_format.format.width
-              , sub_format.format.height
-              , HAL_PIXEL_FORMAT_RGBA_8888
-              , ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT
-              , 30};
-        camera_metadata_t * metadata = allocate_camera_metadata(/*entrys*/1
-              , calculate_camera_metadata_entry_data_size(
-                    get_camera_metadata_tag_type(ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS)
-                  , sizeof(data)) );
-        const int32_t err = add_camera_metadata_entry(metadata
-              , ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS
-              , data, sizeof(data));
-
-        if (err) {
-            metadata = nullptr;
-            ALOGW("Failed to prepare metadata entry, ignored.");
-        }
-
-        sCameraList.emplace_back(metadata, "/dev/video0", sub_format.format.width, sub_format.format.height);
+        sCameraList.emplace_back(CreateCameraMetadata(sub_format.format.width
+                                                    , sub_format.format.height)
+                                     , "/dev/video0", sub_format.format.width
+                                                    , sub_format.format.height);
     } else {
         ALOGD("No camera found with %s", subdev_name);
         return false;
@@ -346,7 +339,9 @@ bool EvsEnumerator::enumerateCamerasKingfisher() {
         if (ioctl(fd, VIDIOC_G_FMT, &format) < 0) {
             ALOGE("VIDIOC_G_FMT: %s for device %s.", strerror(errno), name);
         } else {
-            sCameraList.emplace_back(name, format.fmt.pix.width, format.fmt.pix.height);
+            sCameraList.emplace_back(CreateCameraMetadata(format.fmt.pix.width
+                                                        , format.fmt.pix.height)
+                                   , name, format.fmt.pix.width, format.fmt.pix.height);
             ALOGI("Camera %s (%ux%u) is successfully probed.",
                     name, format.fmt.pix.width, format.fmt.pix.height);
         }
@@ -669,6 +664,63 @@ EvsEnumerator::CameraRecord* EvsEnumerator::findCameraById(const std::string& ca
 
     // We didn't find a match
     return nullptr;
+}
+
+
+camera_metadata_t * EvsEnumerator::CreateCameraMetadata(uint32_t width, uint32_t height)
+{
+    const uint32_t stream_configuration_data [] {
+            0/*id*/
+          , width
+          , height
+          , HAL_PIXEL_FORMAT_RGBA_8888/*hardcoded format*/
+          , ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT
+          , 30/*hardcoded FPS*/};
+    float lens_distortion_data  [] = {0., 0., 0., 0., 0.};
+    float lens_intrinsic_data   [] = {0., 0., 0., 0., 0.};
+    float pose_translation_data [] = {0., 0., 0.};
+    float pose_rotation_data    [] = {0., 0., 0., 0.};
+
+    camera_metadata_t * metadata = allocate_camera_metadata(/*entrys*/5
+          , calculate_camera_metadata_entry_data_size(
+                get_camera_metadata_tag_type(ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS)
+              , sizeof(stream_configuration_data))
+          + calculate_camera_metadata_entry_data_size(
+                get_camera_metadata_tag_type(ANDROID_LENS_DISTORTION)
+              , sizeof(lens_distortion_data))
+          + calculate_camera_metadata_entry_data_size(
+                get_camera_metadata_tag_type(ANDROID_LENS_INTRINSIC_CALIBRATION)
+              , sizeof(lens_intrinsic_data))
+          + calculate_camera_metadata_entry_data_size(
+                get_camera_metadata_tag_type(ANDROID_LENS_POSE_TRANSLATION)
+              , sizeof(pose_translation_data))
+          + calculate_camera_metadata_entry_data_size(
+                get_camera_metadata_tag_type(ANDROID_LENS_POSE_ROTATION)
+              , sizeof(pose_rotation_data)) );
+
+    int32_t err = 0;
+    err += add_camera_metadata_entry(metadata
+          , ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS
+          , stream_configuration_data, sizeof(stream_configuration_data));
+    err += add_camera_metadata_entry(metadata
+          , ANDROID_LENS_DISTORTION
+          , lens_distortion_data, sizeof(lens_distortion_data)/sizeof(lens_distortion_data[0]));
+    err += add_camera_metadata_entry(metadata
+          , ANDROID_LENS_INTRINSIC_CALIBRATION
+          , lens_intrinsic_data, sizeof(lens_intrinsic_data)/sizeof(lens_intrinsic_data[0]));
+    err += add_camera_metadata_entry(metadata
+          , ANDROID_LENS_POSE_TRANSLATION
+          , pose_translation_data, sizeof(pose_translation_data)/sizeof(pose_translation_data[0]));
+    err += add_camera_metadata_entry(metadata
+          , ANDROID_LENS_POSE_ROTATION
+          , pose_rotation_data, sizeof(pose_rotation_data)/sizeof(pose_rotation_data[0]));
+
+    if (err) {
+        metadata = nullptr;
+        ALOGW("Failed to prepare metadata entry, ignored.");
+    }
+
+    return metadata;
 }
 
 } // namespace renesas

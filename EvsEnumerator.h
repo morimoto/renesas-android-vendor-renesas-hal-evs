@@ -91,21 +91,11 @@ private:
             uint32_t height{0};
         } dim;
 
-        CameraRecord(camera_metadata_t const * meta, const char *cameraId, uint32_t width, uint32_t height) {
-            desc.v1.cameraId = cameraId;
-            dim.width = width;
-            dim.height = height;
-            if (meta) {
-                desc.metadata.setToExternal((uint8_t *)meta, get_camera_metadata_size(meta));
-            }
-        }
-
-        CameraRecord(const char *cameraId, uint32_t width, uint32_t height)
-            : CameraRecord(nullptr, cameraId, width, height) {
-        }
+        CameraRecord(camera_metadata_t const *, const char *, uint32_t, uint32_t);
     };
 
     static CameraRecord* findCameraById(const std::string& cameraId);
+    static camera_metadata_t * CreateCameraMetadata(uint32_t, uint32_t);
 
     // NOTE:  All members values are static so that all clients operate on the same state
     //        That is to say, this is effectively a singleton despite the fact that HIDL
