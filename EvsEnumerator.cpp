@@ -41,53 +41,61 @@ std::list<EvsEnumerator::CameraRecord>   EvsEnumerator::sCameraList;
 wp<EvsDisplay>                           EvsEnumerator::sActiveDisplay;
 
 
-EvsEnumerator::EvsEnumerator() {
+EvsEnumerator::EvsEnumerator(Platform platform) {
     ALOGD("EvsEnumerator created");
-    /*
-    For HDMI connector:
-    v4l-subdev0 --- rcar_csi2 feaa0000.csi2
-    v4l-subdev2 --- adv748x 4-0070 hdmi
-    v4l-subdev3 --- adv748x 4-0070 txa
-    */
 
-    /* subdev for HDMI camera input */
-    const char *subdev_name = "/dev/v4l-subdev2";
-    // Constant predefined list of EVS cameras in the "/dev" filesystem.
-    const std::vector<const char *> cameraNames {
-        "/dev/video3",
-        "/dev/video2",
-        "/dev/video1",
-        "/dev/video0"
-    };
+    switch (platform) {
+        case Platform::Salvator: {
+            // For HDMI connector:
+            // v4l-subdev0 --- rcar_csi2 feaa0000.csi2
+            // v4l-subdev2 --- adv748x 4-0070 hdmi
+            // v4l-subdev3 --- adv748x 4-0070 txa
+            // subdev for HDMI camera input
+            const char *subdev_name = "/dev/v4l-subdev2";
 
-    if(access(subdev_name, F_OK ) != -1){
-        if(subdevCameraSetup(subdev_name)) {
-            ALOGD("Successfully setup camera %s", subdev_name);
-        } else {
-            ALOGE("Error during setup %s", subdev_name);
-        }
-    } else {
-        // Probe each camera one by one and use only that which can be opened and requested.
-        for (auto cn : cameraNames) {
-            const int fd = open(cn, O_RDWR);
-            if (-1 == fd) {
-                ALOGE("Error while opening device %s: %s.", cn, strerror(errno));
-                continue;
-            }
-
-            v4l2_format format;
-            std::memset(&format, 0x00, sizeof(format));
-            format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-            if (ioctl(fd, VIDIOC_G_FMT, &format) < 0) {
-                ALOGE("VIDIOC_G_FMT: %s for device %s.", strerror(errno), cn);
+            if(subdevCameraSetup(subdev_name)) {
+                 ALOGD("Successfully setup camera %s", subdev_name);
             } else {
-                sCameraList.emplace_back(cn, format.fmt.pix.width, format.fmt.pix.height);
-                ALOGI("Camera %s (%ux%u) is successfully probed.",
-                        cn, format.fmt.pix.width, format.fmt.pix.height);
+                ALOGE("Error during setup %s", subdev_name);
             }
-
-            close(fd);
+            break;
         }
+        case Platform::Kingfisher: {
+            // Constant predefined list of EVS cameras in the "/dev" filesystem.
+            const std::vector<const char *> cameraNames {
+                "/dev/video3",
+                "/dev/video2",
+                "/dev/video1",
+                "/dev/video0"
+            };
+
+            // Probe each camera one by one and use only that which can be opened and requested.
+            for (auto cn : cameraNames) {
+                const int fd = open(cn, O_RDWR);
+                if (-1 == fd) {
+                    ALOGE("Error while opening device %s: %s.", cn, strerror(errno));
+                    continue;
+                }
+
+                v4l2_format format;
+                std::memset(&format, 0x00, sizeof(format));
+                format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+                if (ioctl(fd, VIDIOC_G_FMT, &format) < 0) {
+                    ALOGE("VIDIOC_G_FMT: %s for device %s.", strerror(errno), cn);
+                } else {
+                sCameraList.emplace_back(cn, format.fmt.pix.width, format.fmt.pix.height);
+                    ALOGI("Camera %s (%ux%u) is successfully probed.",
+                            cn, format.fmt.pix.width, format.fmt.pix.height);
+                }
+
+                close(fd);
+            }
+            break;
+        }
+        case Platform::Unknown:
+        default:
+            ALOGE("Unknown hardware environment!");
+            break;
     }
 }
 

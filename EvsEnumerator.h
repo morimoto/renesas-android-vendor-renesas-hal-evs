@@ -36,6 +36,13 @@ class EvsCamera;    // from EvsCamera.h
 class EvsDisplay;   // from EvsDisplay.h
 
 
+enum class Platform {
+    Unknown
+  , Salvator
+  , Kingfisher
+};
+
+
 class EvsEnumerator : public IEvsEnumerator {
 public:
     // Methods from ::android::hardware::automotive::evs::V1_0::IEvsEnumerator follow.
@@ -47,7 +54,7 @@ public:
     Return<DisplayState> getDisplayState()  override;
 
     // Implementation details
-    EvsEnumerator();
+    EvsEnumerator(Platform);
     ~EvsEnumerator () override = default;
 
 private:

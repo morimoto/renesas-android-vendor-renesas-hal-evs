@@ -1,4 +1,4 @@
-service vendor.evs-1-0 /vendor/bin/hw/android.hardware.automotive.evs@1.0-service.renesas
+service vendor.evs-1-0 /vendor/bin/hw/android.hardware.automotive.evs@1.0-service.renesas ${ro.hardware}
     priority -20
     class early_hal
     user automotive_evs

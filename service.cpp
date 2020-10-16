@@ -43,10 +43,19 @@ using namespace android;
 
 using vendor::renesas::graphics::composer::V2_0::IComposer;
 
-int main() {
+int main(int argc, char ** argv) {
+    Platform platform = Platform::Unknown;
+    if (argc >= 2) {
+        ALOGI("The specified platform: %s.", argv[1]);
+        if (!strcmp(argv[1], "salvator")) {
+            platform = Platform::Salvator;
+        } else if (!strcmp(argv[1], "kingfisher")) {
+            platform = Platform::Kingfisher;
+        }
+    }
 
     sp<IComposer> composer = IComposer::getService();
-    android::sp<IEvsEnumerator> service = new EvsEnumerator();
+    android::sp<IEvsEnumerator> service = new EvsEnumerator(platform);
 
     configureRpcThreadpool(1, true /* callerWillJoin */);
 
