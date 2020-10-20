@@ -62,18 +62,93 @@ EvsEnumerator::EvsEnumerator(Platform platform) {
         }
         case Platform::Kingfisher: {
             // Constant predefined list of EVS cameras in the "/dev" filesystem.
-            const std::vector<const char *> cameraNames {
-                "/dev/video3",
-                "/dev/video2",
-                "/dev/video1",
-                "/dev/video0"
+            // source pad - entity 1: 'rcar_csi2 feaa0000.csi2':1
+            // source pad - entity 1: 'rcar_csi2 feaa0000.csi2':2
+            // source pad - entity 1: 'rcar_csi2 feaa0000.csi2':3
+            // source pad - entity 1: 'rcar_csi2 feaa0000.csi2':4
+            // sink pad - entity 43: 'VIN0 output':0
+            // sink pad - entity 47: 'VIN1 output':0
+            // sink pad - entity 51: 'VIN2 output':0
+            // sink pad - entity 55: 'VIN3 output':0
+            struct {
+                const char * devname;
+                const char * subdevname;
+                int source;
+                int sink;
+            } cameras [] = {
+                {"/dev/video3", "/dev/v4l-subdev2", 4, 55},
+                {"/dev/video2", "/dev/v4l-subdev3", 3, 51},
+                {"/dev/video1", "/dev/v4l-subdev4", 2, 47},
+                {"/dev/video0", "/dev/v4l-subdev5", 1, 43}
             };
+            // media-ctl -d /dev/media0 -l "'rcar_csi2 feaa0000.csi2':1 -> 'VIN0 output':0 [1]"
+            // media-ctl -d /dev/media0 -l "'rcar_csi2 feaa0000.csi2':2 -> 'VIN1 output':0 [1]"
+            // media-ctl -d /dev/media0 -l "'rcar_csi2 feaa0000.csi2':3 -> 'VIN2 output':0 [1]"
+            // media-ctl -d /dev/media0 -l "'rcar_csi2 feaa0000.csi2':4 -> 'VIN3 output':0 [1]"
 
-            // Probe each camera one by one and use only that which can be opened and requested.
-            for (auto cn : cameraNames) {
-                const int fd = open(cn, O_RDWR);
+            // media-ctl -d /dev/media0 -V "'rcar_csi2 feaa0000.csi2':1 [fmt:UYVY8_2X8/1280x800 field:none]"
+
+            int fd = -1;
+            if( (fd = open("/dev/media0", O_RDWR)) == -1) {
+                ALOGE("Error while opening device %s: %s", "/dev/media0", strerror(errno));
+                break;
+            }
+
+            // Setup pipiline links.
+            for (auto& [name, subname, source, sink] : cameras) {
+                media_link_desc ulink = {};
+
+                ulink.source.entity = 1;
+                ulink.source.index = source;
+                ulink.source.flags = MEDIA_PAD_FL_SOURCE;
+
+                ulink.sink.entity = sink;
+                ulink.sink.index = 0;
+                ulink.sink.flags = MEDIA_PAD_FL_SINK;
+
+                ulink.flags = MEDIA_LNK_FL_ENABLED;
+
+                if (ioctl(fd, MEDIA_IOC_SETUP_LINK, &ulink) < 0) {
+                    ALOGE("%s MEDIA_IOC_SETUP_LINK: %s, for camera: %s.", "/dev/media0", strerror(errno), name);
+                    continue;
+                }
+            }
+            close(fd);
+
+            // - entity 15: ov10635 28-0063 (1 pad, 1 link)
+            //              type V4L2 subdev subtype Sensor flags 0
+            //              device node name /dev/v4l-subdev2
+            //         pad0: Source
+            //                 [fmt:UYVY8_2X8/1280x800@1/30 field:none colorspace:smpte170m
+            //                  crop.bounds:(0,0)/1280x800
+            //                  crop:(0,0)/1280x800]
+            //                 -> "max9286 18-002c":3 [ENABLED,IMMUTABLE]
+            v4l2_subdev_format sub_format = {};
+            sub_format.which = V4L2_SUBDEV_FORMAT_ACTIVE;
+            sub_format.format.code = MEDIA_BUS_FMT_UYVY8_2X8;
+            sub_format.format.field = V4L2_FIELD_NONE;
+            sub_format.format.colorspace = V4L2_COLORSPACE_SMPTE170M;
+            // Setup sensors.
+            for (auto& [name, subname, source, sink] : cameras) {
+                sub_format.format.width = 0;
+                sub_format.format.height = 0;
+                sub_format.pad = 0;
+
+                if((fd = open(subname, O_RDWR)) == -1) {
+                    ALOGE("Error while opening device %s: %s", subname, strerror(errno));
+                    break;
+                }
+                if (ioctl(fd, VIDIOC_SUBDEV_G_FMT, &sub_format) < 0) {
+                    ALOGE("%s VIDIOC_SUBDEV_G_FMT: %s", subname, strerror(errno));
+                    break;
+                } else {
+                    ALOGI("Default settings for %s: %ux%u.", subname, sub_format.format.width, sub_format.format.height);
+                }
+                close(fd);
+
+                fd = open(name, O_RDWR);
                 if (-1 == fd) {
-                    ALOGE("Error while opening device %s: %s.", cn, strerror(errno));
+                    ALOGE("Error while opening device %s: %s.", name, strerror(errno));
                     continue;
                 }
 
@@ -81,15 +156,39 @@ EvsEnumerator::EvsEnumerator(Platform platform) {
                 std::memset(&format, 0x00, sizeof(format));
                 format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
                 if (ioctl(fd, VIDIOC_G_FMT, &format) < 0) {
-                    ALOGE("VIDIOC_G_FMT: %s for device %s.", strerror(errno), cn);
+                    ALOGE("VIDIOC_G_FMT: %s for device %s.", strerror(errno), name);
+                }
+                format.fmt.pix.width = sub_format.format.width;
+                format.fmt.pix.height = sub_format.format.height;
+                if (ioctl(fd, VIDIOC_S_FMT, &format) < 0) {
+                    ALOGE("VIDIOC_S_FMT: %s for device %s.", strerror(errno), name);
+                }
+
+                if (ioctl(fd, VIDIOC_G_FMT, &format) < 0) {
+                    ALOGE("VIDIOC_G_FMT: %s for device %s.", strerror(errno), name);
                 } else {
-                sCameraList.emplace_back(cn, format.fmt.pix.width, format.fmt.pix.height);
+                sCameraList.emplace_back(name, format.fmt.pix.width, format.fmt.pix.height);
                     ALOGI("Camera %s (%ux%u) is successfully probed.",
-                            cn, format.fmt.pix.width, format.fmt.pix.height);
+                            name, format.fmt.pix.width, format.fmt.pix.height);
                 }
 
                 close(fd);
             }
+
+            // entity 1: rcar_csi2 feaa0000.csi2 (5 pads, 9 links)
+            //            device node name /dev/v4l-subdev0
+            //     pad0: Sink
+            //            <- "max9286 18-002c":4 [ENABLED,IMMUTABLE]
+            if((fd = open("/dev/v4l-subdev0", O_RDWR)) == -1) {
+                ALOGE("Error while opening device %s: %s", "/dev/v4l-subdev0", strerror(errno));
+                break;
+            }
+            if (ioctl(fd, VIDIOC_SUBDEV_S_FMT, &sub_format) < 0) {
+                ALOGE("%s VIDIOC_SUBDEV_S_FMT: %s", "/dev/v4l-subdev0", strerror(errno));
+                break;
+            }
+            close(fd);
+
             break;
         }
         case Platform::Unknown:
