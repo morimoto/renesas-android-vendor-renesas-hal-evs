@@ -45,152 +45,16 @@ EvsEnumerator::EvsEnumerator(Platform platform) {
     ALOGD("EvsEnumerator created");
 
     switch (platform) {
-        case Platform::Salvator: {
-            // For HDMI connector:
-            // v4l-subdev0 --- rcar_csi2 feaa0000.csi2
-            // v4l-subdev2 --- adv748x 4-0070 hdmi
-            // v4l-subdev3 --- adv748x 4-0070 txa
-            // subdev for HDMI camera input
-            const char *subdev_name = "/dev/v4l-subdev2";
-
-            if(subdevCameraSetup(subdev_name)) {
-                 ALOGD("Successfully setup camera %s", subdev_name);
-            } else {
-                ALOGE("Error during setup %s", subdev_name);
+        case Platform::Salvator:
+            if(!enumerateCamerasSalvator()) {
+                ALOGE("Error during enumerate cameras.");
             }
             break;
-        }
-        case Platform::Kingfisher: {
-            // Constant predefined list of EVS cameras in the "/dev" filesystem.
-            // source pad - entity 1: 'rcar_csi2 feaa0000.csi2':1
-            // source pad - entity 1: 'rcar_csi2 feaa0000.csi2':2
-            // source pad - entity 1: 'rcar_csi2 feaa0000.csi2':3
-            // source pad - entity 1: 'rcar_csi2 feaa0000.csi2':4
-            // sink pad - entity 43: 'VIN0 output':0
-            // sink pad - entity 47: 'VIN1 output':0
-            // sink pad - entity 51: 'VIN2 output':0
-            // sink pad - entity 55: 'VIN3 output':0
-            struct {
-                const char * devname;
-                const char * subdevname;
-                int source;
-                int sink;
-            } cameras [] = {
-                {"/dev/video3", "/dev/v4l-subdev2", 4, 55},
-                {"/dev/video2", "/dev/v4l-subdev3", 3, 51},
-                {"/dev/video1", "/dev/v4l-subdev4", 2, 47},
-                {"/dev/video0", "/dev/v4l-subdev5", 1, 43}
-            };
-            // media-ctl -d /dev/media0 -l "'rcar_csi2 feaa0000.csi2':1 -> 'VIN0 output':0 [1]"
-            // media-ctl -d /dev/media0 -l "'rcar_csi2 feaa0000.csi2':2 -> 'VIN1 output':0 [1]"
-            // media-ctl -d /dev/media0 -l "'rcar_csi2 feaa0000.csi2':3 -> 'VIN2 output':0 [1]"
-            // media-ctl -d /dev/media0 -l "'rcar_csi2 feaa0000.csi2':4 -> 'VIN3 output':0 [1]"
-
-            // media-ctl -d /dev/media0 -V "'rcar_csi2 feaa0000.csi2':1 [fmt:UYVY8_2X8/1280x800 field:none]"
-
-            int fd = -1;
-            if( (fd = open("/dev/media0", O_RDWR)) == -1) {
-                ALOGE("Error while opening device %s: %s", "/dev/media0", strerror(errno));
-                break;
+        case Platform::Kingfisher:
+            if(!enumerateCamerasKingfisher()) {
+                ALOGE("Error during enumerate cameras.");
             }
-
-            // Setup pipiline links.
-            for (auto& [name, subname, source, sink] : cameras) {
-                media_link_desc ulink = {};
-
-                ulink.source.entity = 1;
-                ulink.source.index = source;
-                ulink.source.flags = MEDIA_PAD_FL_SOURCE;
-
-                ulink.sink.entity = sink;
-                ulink.sink.index = 0;
-                ulink.sink.flags = MEDIA_PAD_FL_SINK;
-
-                ulink.flags = MEDIA_LNK_FL_ENABLED;
-
-                if (ioctl(fd, MEDIA_IOC_SETUP_LINK, &ulink) < 0) {
-                    ALOGE("%s MEDIA_IOC_SETUP_LINK: %s, for camera: %s.", "/dev/media0", strerror(errno), name);
-                    continue;
-                }
-            }
-            close(fd);
-
-            // - entity 15: ov10635 28-0063 (1 pad, 1 link)
-            //              type V4L2 subdev subtype Sensor flags 0
-            //              device node name /dev/v4l-subdev2
-            //         pad0: Source
-            //                 [fmt:UYVY8_2X8/1280x800@1/30 field:none colorspace:smpte170m
-            //                  crop.bounds:(0,0)/1280x800
-            //                  crop:(0,0)/1280x800]
-            //                 -> "max9286 18-002c":3 [ENABLED,IMMUTABLE]
-            v4l2_subdev_format sub_format = {};
-            sub_format.which = V4L2_SUBDEV_FORMAT_ACTIVE;
-            sub_format.format.code = MEDIA_BUS_FMT_UYVY8_2X8;
-            sub_format.format.field = V4L2_FIELD_NONE;
-            sub_format.format.colorspace = V4L2_COLORSPACE_SMPTE170M;
-            // Setup sensors.
-            for (auto& [name, subname, source, sink] : cameras) {
-                sub_format.format.width = 0;
-                sub_format.format.height = 0;
-                sub_format.pad = 0;
-
-                if((fd = open(subname, O_RDWR)) == -1) {
-                    ALOGE("Error while opening device %s: %s", subname, strerror(errno));
-                    break;
-                }
-                if (ioctl(fd, VIDIOC_SUBDEV_G_FMT, &sub_format) < 0) {
-                    ALOGE("%s VIDIOC_SUBDEV_G_FMT: %s", subname, strerror(errno));
-                    break;
-                } else {
-                    ALOGI("Default settings for %s: %ux%u.", subname, sub_format.format.width, sub_format.format.height);
-                }
-                close(fd);
-
-                fd = open(name, O_RDWR);
-                if (-1 == fd) {
-                    ALOGE("Error while opening device %s: %s.", name, strerror(errno));
-                    continue;
-                }
-
-                v4l2_format format;
-                std::memset(&format, 0x00, sizeof(format));
-                format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-                if (ioctl(fd, VIDIOC_G_FMT, &format) < 0) {
-                    ALOGE("VIDIOC_G_FMT: %s for device %s.", strerror(errno), name);
-                }
-                format.fmt.pix.width = sub_format.format.width;
-                format.fmt.pix.height = sub_format.format.height;
-                if (ioctl(fd, VIDIOC_S_FMT, &format) < 0) {
-                    ALOGE("VIDIOC_S_FMT: %s for device %s.", strerror(errno), name);
-                }
-
-                if (ioctl(fd, VIDIOC_G_FMT, &format) < 0) {
-                    ALOGE("VIDIOC_G_FMT: %s for device %s.", strerror(errno), name);
-                } else {
-                sCameraList.emplace_back(name, format.fmt.pix.width, format.fmt.pix.height);
-                    ALOGI("Camera %s (%ux%u) is successfully probed.",
-                            name, format.fmt.pix.width, format.fmt.pix.height);
-                }
-
-                close(fd);
-            }
-
-            // entity 1: rcar_csi2 feaa0000.csi2 (5 pads, 9 links)
-            //            device node name /dev/v4l-subdev0
-            //     pad0: Sink
-            //            <- "max9286 18-002c":4 [ENABLED,IMMUTABLE]
-            if((fd = open("/dev/v4l-subdev0", O_RDWR)) == -1) {
-                ALOGE("Error while opening device %s: %s", "/dev/v4l-subdev0", strerror(errno));
-                break;
-            }
-            if (ioctl(fd, VIDIOC_SUBDEV_S_FMT, &sub_format) < 0) {
-                ALOGE("%s VIDIOC_SUBDEV_S_FMT: %s", "/dev/v4l-subdev0", strerror(errno));
-                break;
-            }
-            close(fd);
-
             break;
-        }
         case Platform::Unknown:
         default:
             ALOGE("Unknown hardware environment!");
@@ -198,42 +62,39 @@ EvsEnumerator::EvsEnumerator(Platform platform) {
     }
 }
 
-/*
- * This method send VIDIOC_SUBDEV_G_FMT ioctl through subdev interface to
- * receive current camera format. In case of correct answer it creates
- * CameraRecord in EvsEenumerator::sCameraList with preferred camera parameters.
- * If ioctl return zeros in width and height fields - it means that camera not
- * connected.
- */
-bool EvsEnumerator::subdevCameraSetup(const char* subdev_name) {
-    /*
-    Set input resolution and format.
-    Here we are opening the appropriate sub-device node to do this.
-    We know the sub-device number. However, it might not be known always.
 
-    For HDMI connector:
-    v4l-subdev0 --- rcar_csi2 feaa0000.csi2
-    v4l-subdev2 --- adv748x 4-0070 hdmi
-    v4l-subdev3 --- adv748x 4-0070 txa
-
-    For CVBS connector:
-    v4l-subdev4 --- rcar_csi2 fea80000.csi2
-    v4l-subdev1 --- adv748x 4-0070 afe
-    v4l-subdev5 --- adv748x 4-0070 txb
-
-    Flow of digital data:
-    HDMI Connector -{HD digital Signal}-> [ ADV7482 HDMI --> ADV7482 TXA ] -{RGB-888 24-bit data}-> CSI40 --> VIN --> V4L2 /dev/videoX
-    RCA  Connector -{NTSC/PAL Signal}->   [ ADV7482 AFE  --> ADV7482 TXB ] -{YCbCr422 8-bit data}-> CSI20 --> VIN --> V4L2 /dev/videoX
-
-    PADs:
-    [0]ADV7482  HDMI[1] --> [0]ADV7482 TXA[1] --> [1-4]CSI40[0] --> [0]VIN
-    [0-7]ADV7482 AFE[8] --> [0]ADV7482 TXB[1] --> [1-4]CSI20[0] --> [0]VIN
-
-    Supports clipping and scaling using the hardware function of the VIN
-    The clipping area is set with VIDIOC_S_CROP interface of V4L2
-    The output image size is set by VIDIOC_S_FMT interface of V4L2
-    VIN input image --> Clipping(VIDIOC_S_CROP) --> Output image(VIDIOC_S_FMT)
-    */
+// This method send VIDIOC_SUBDEV_G_FMT ioctl through subdev interface to
+// receive current camera format. In case of correct answer it creates
+// CameraRecord in EvsEenumerator::sCameraList with preferred camera parameters.
+// If ioctl return zeros in width and height fields - it means that camera not
+// connected.
+bool EvsEnumerator::enumerateCamerasSalvator() {
+    // Set input resolution and format.
+    // Here we are opening the appropriate sub-device node to do this.
+    // We know the sub-device number. However, it might not be known always.
+    //
+    // For HDMI connector:
+    // v4l-subdev0 --- rcar_csi2 feaa0000.csi2
+    // v4l-subdev2 --- adv748x 4-0070 hdmi
+    // v4l-subdev3 --- adv748x 4-0070 txa
+    //
+    // For CVBS connector:
+    // v4l-subdev4 --- rcar_csi2 fea80000.csi2
+    // v4l-subdev1 --- adv748x 4-0070 afe
+    // v4l-subdev5 --- adv748x 4-0070 txb
+    //
+    // Flow of digital data:
+    // HDMI Connector -{HD digital Signal}-> [ ADV7482 HDMI --> ADV7482 TXA ] -{RGB-888 24-bit data}-> CSI40 --> VIN --> V4L2 /dev/videoX
+    // RCA  Connector -{NTSC/PAL Signal}->   [ ADV7482 AFE  --> ADV7482 TXB ] -{YCbCr422 8-bit data}-> CSI20 --> VIN --> V4L2 /dev/videoX
+    //
+    // PADs:
+    // [0]ADV7482  HDMI[1] --> [0]ADV7482 TXA[1] --> [1-4]CSI40[0] --> [0]VIN
+    // [0-7]ADV7482 AFE[8] --> [0]ADV7482 TXB[1] --> [1-4]CSI20[0] --> [0]VIN
+    //
+    // Supports clipping and scaling using the hardware function of the VIN
+    // The clipping area is set with VIDIOC_S_CROP interface of V4L2
+    // The output image size is set by VIDIOC_S_FMT interface of V4L2
+    // VIN input image --> Clipping(VIDIOC_S_CROP) --> Output image(VIDIOC_S_FMT)
 
     v4l2_subdev_format sub_format = {};
     sub_format.which = V4L2_SUBDEV_FORMAT_ACTIVE;
@@ -246,14 +107,11 @@ bool EvsEnumerator::subdevCameraSetup(const char* subdev_name) {
 
     int fd = -1;
 
-    /*
-     * To enable a link use the media-ctl utility from v4l-utils package
-     * media-ctl -d /dev/media0 -l "'rcar_csi2 feaa0000.csi2':1 -> 'VIN0 output':0 [1]"
-     * or
-     * media-ctl -d /dev/media0 -l "1:1 -> 54:0 [1]"
-     * IDs/indexes were received from here: media-ctl /dev/media0 -p
-     */
-
+    // To enable a link use the media-ctl utility from v4l-utils package
+    // media-ctl -d /dev/media0 -l "'rcar_csi2 feaa0000.csi2':1 -> 'VIN0 output':0 [1]"
+    // or
+    // media-ctl -d /dev/media0 -l "1:1 -> 54:0 [1]"
+    // IDs/indexes were received from here: media-ctl /dev/media0 -p
     if( (fd = open("/dev/media0", O_RDWR)) == -1) {
         ALOGE("Error while opening device %s: %s", "/dev/media0", strerror(errno));
         return false;
@@ -261,12 +119,12 @@ bool EvsEnumerator::subdevCameraSetup(const char* subdev_name) {
 
     media_link_desc ulink = {};
 
-    /* source pad - 'rcar_csi2 feaa0000.csi2':1*/
+    // source pad - 'rcar_csi2 feaa0000.csi2':1
     ulink.source.entity = 1;
     ulink.source.index = 1;
     ulink.source.flags = MEDIA_PAD_FL_SOURCE;
 
-    /* sink pad - 'VIN0 output':0*/
+    // sink pad - 'VIN0 output':0
     ulink.sink.entity = 54;
     ulink.sink.index = 0;
     ulink.sink.flags = MEDIA_PAD_FL_SINK;
@@ -281,11 +139,11 @@ bool EvsEnumerator::subdevCameraSetup(const char* subdev_name) {
     close(fd);
 
 
-    /* Setup video formats
-     * media-ctl -d /dev/media0 -V "'rcar_csi2 feaa0000.csi2':1 [fmt:RGB888_1X24/1920x1080 field:none]"
-     * media-ctl -d /dev/media0 -V "'adv748x 4-0070 hdmi':1 [fmt:RGB888_1X24/1920x1080 field:none]"
-     * media-ctl -d /dev/media0 -V "'adv748x 4-0070 txa':1 [fmt:RGB888_1X24/1920x1080 field:none]"
-     */
+    // Setup video formats
+    // media-ctl -d /dev/media0 -V "'rcar_csi2 feaa0000.csi2':1 [fmt:RGB888_1X24/1920x1080 field:none]"
+    // media-ctl -d /dev/media0 -V "'adv748x 4-0070 hdmi':1 [fmt:RGB888_1X24/1920x1080 field:none]"
+    // media-ctl -d /dev/media0 -V "'adv748x 4-0070 txa':1 [fmt:RGB888_1X24/1920x1080 field:none]"
+    const char *subdev_name = "/dev/v4l-subdev2";
     if( (fd = open(subdev_name, O_RDWR)) == -1) {
         ALOGE("Error while opening device %s: %s", subdev_name, strerror(errno));
         return false;
@@ -300,7 +158,7 @@ bool EvsEnumerator::subdevCameraSetup(const char* subdev_name) {
     ALOGD("Parameters received from camera is w=%u h=%u\n",
                 sub_format.format.width, sub_format.format.height);
     if(sub_format.format.height && sub_format.format.width){
-        /* Set format on source pad of CSI2 */
+        // Set format on source pad of CSI2
         sub_format.pad = 0;
         if ((fd = open("/dev/v4l-subdev0", O_RDWR)) == -1) {
             ALOGE("Error while opening device %s: %s", "/dev/v4l-subdev0", strerror(errno));
@@ -313,7 +171,7 @@ bool EvsEnumerator::subdevCameraSetup(const char* subdev_name) {
         }
         close(fd);
 
-        /* Set format on source (output, ADV748X_HDMI_SOURCE) pad of ADV7482 HDMI */
+        // Set format on source (output, ADV748X_HDMI_SOURCE) pad of ADV7482 HDMI
         sub_format.pad = 1;
         if ((fd = open("/dev/v4l-subdev2", O_RDWR)) == -1) {
             ALOGE("Error while opening device %s: %s", "/dev/v4l-subdev2", strerror(errno));
@@ -326,7 +184,7 @@ bool EvsEnumerator::subdevCameraSetup(const char* subdev_name) {
         }
         close(fd);
 
-        /* Set format on sink (input, ADV748X_CSI2_SINK) pad of ADV7482 TXA */
+        // Set format on sink (input, ADV748X_CSI2_SINK) pad of ADV7482 TXA
         sub_format.pad = 0;
         if ((fd = open("/dev/v4l-subdev3", O_RDWR)) == -1) {
             ALOGE("Error while opening device %s: %s", "/dev/v4l-subdev3", strerror(errno));
@@ -346,6 +204,140 @@ bool EvsEnumerator::subdevCameraSetup(const char* subdev_name) {
     }
     return true;
 }
+
+
+bool EvsEnumerator::enumerateCamerasKingfisher() {
+    // Constant predefined list of EVS cameras in the "/dev" filesystem.
+    // source pad - entity 1: 'rcar_csi2 feaa0000.csi2':1
+    // source pad - entity 1: 'rcar_csi2 feaa0000.csi2':2
+    // source pad - entity 1: 'rcar_csi2 feaa0000.csi2':3
+    // source pad - entity 1: 'rcar_csi2 feaa0000.csi2':4
+    // sink pad - entity 43: 'VIN0 output':0
+    // sink pad - entity 47: 'VIN1 output':0
+    // sink pad - entity 51: 'VIN2 output':0
+    // sink pad - entity 55: 'VIN3 output':0
+    struct {
+        const char * devname;
+        const char * subdevname;
+        int source;
+        int sink;
+    } cameras [] = {
+        {"/dev/video3", "/dev/v4l-subdev2", 4, 55},
+        {"/dev/video2", "/dev/v4l-subdev3", 3, 51},
+        {"/dev/video1", "/dev/v4l-subdev4", 2, 47},
+        {"/dev/video0", "/dev/v4l-subdev5", 1, 43}
+    };
+    // media-ctl -d /dev/media0 -l "'rcar_csi2 feaa0000.csi2':1 -> 'VIN0 output':0 [1]"
+    // media-ctl -d /dev/media0 -l "'rcar_csi2 feaa0000.csi2':2 -> 'VIN1 output':0 [1]"
+    // media-ctl -d /dev/media0 -l "'rcar_csi2 feaa0000.csi2':3 -> 'VIN2 output':0 [1]"
+    // media-ctl -d /dev/media0 -l "'rcar_csi2 feaa0000.csi2':4 -> 'VIN3 output':0 [1]"
+
+    // media-ctl -d /dev/media0 -V "'rcar_csi2 feaa0000.csi2':1 [fmt:UYVY8_2X8/1280x800 field:none]"
+
+    int fd = -1;
+    if( (fd = open("/dev/media0", O_RDWR)) == -1) {
+        ALOGE("Error while opening device %s: %s", "/dev/media0", strerror(errno));
+        return false;
+    }
+
+    // Setup pipiline links.
+    for (auto& [name, subname, source, sink] : cameras) {
+        media_link_desc ulink = {};
+
+        ulink.source.entity = 1;
+        ulink.source.index = source;
+        ulink.source.flags = MEDIA_PAD_FL_SOURCE;
+
+        ulink.sink.entity = sink;
+        ulink.sink.index = 0;
+        ulink.sink.flags = MEDIA_PAD_FL_SINK;
+
+        ulink.flags = MEDIA_LNK_FL_ENABLED;
+
+        if (ioctl(fd, MEDIA_IOC_SETUP_LINK, &ulink) < 0) {
+            ALOGE("%s MEDIA_IOC_SETUP_LINK: %s, for camera: %s.", "/dev/media0", strerror(errno), name);
+            continue;
+        }
+    }
+    close(fd);
+
+    // - entity 15: ov10635 28-0063 (1 pad, 1 link)
+    //              type V4L2 subdev subtype Sensor flags 0
+    //              device node name /dev/v4l-subdev2
+    //         pad0: Source
+    //                 [fmt:UYVY8_2X8/1280x800@1/30 field:none colorspace:smpte170m
+    //                  crop.bounds:(0,0)/1280x800
+    //                  crop:(0,0)/1280x800]
+    //                 -> "max9286 18-002c":3 [ENABLED,IMMUTABLE]
+    v4l2_subdev_format sub_format = {};
+    sub_format.which = V4L2_SUBDEV_FORMAT_ACTIVE;
+    sub_format.format.code = MEDIA_BUS_FMT_UYVY8_2X8;
+    sub_format.format.field = V4L2_FIELD_NONE;
+    sub_format.format.colorspace = V4L2_COLORSPACE_SMPTE170M;
+    // Setup sensors.
+    for (auto& [name, subname, source, sink] : cameras) {
+        sub_format.format.width = 0;
+        sub_format.format.height = 0;
+        sub_format.pad = 0;
+
+        if((fd = open(subname, O_RDWR)) == -1) {
+            ALOGE("Error while opening device %s: %s", subname, strerror(errno));
+            continue;
+        }
+        if (ioctl(fd, VIDIOC_SUBDEV_G_FMT, &sub_format) < 0) {
+            ALOGE("%s VIDIOC_SUBDEV_G_FMT: %s", subname, strerror(errno));
+            continue;
+        } else {
+            ALOGI("Default settings for %s: %ux%u.", subname, sub_format.format.width, sub_format.format.height);
+        }
+        close(fd);
+
+        fd = open(name, O_RDWR);
+        if (-1 == fd) {
+            ALOGE("Error while opening device %s: %s.", name, strerror(errno));
+            continue;
+        }
+
+        v4l2_format format;
+        std::memset(&format, 0x00, sizeof(format));
+        format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        if (ioctl(fd, VIDIOC_G_FMT, &format) < 0) {
+            ALOGE("VIDIOC_G_FMT: %s for device %s.", strerror(errno), name);
+        }
+        format.fmt.pix.width = sub_format.format.width;
+        format.fmt.pix.height = sub_format.format.height;
+        if (ioctl(fd, VIDIOC_S_FMT, &format) < 0) {
+            ALOGE("VIDIOC_S_FMT: %s for device %s.", strerror(errno), name);
+        }
+
+        if (ioctl(fd, VIDIOC_G_FMT, &format) < 0) {
+            ALOGE("VIDIOC_G_FMT: %s for device %s.", strerror(errno), name);
+        } else {
+            sCameraList.emplace_back(name, format.fmt.pix.width, format.fmt.pix.height);
+            ALOGI("Camera %s (%ux%u) is successfully probed.",
+                    name, format.fmt.pix.width, format.fmt.pix.height);
+        }
+
+        close(fd);
+    }
+
+    // entity 1: rcar_csi2 feaa0000.csi2 (5 pads, 9 links)
+    //            device node name /dev/v4l-subdev0
+    //     pad0: Sink
+    //            <- "max9286 18-002c":4 [ENABLED,IMMUTABLE]
+    if((fd = open("/dev/v4l-subdev0", O_RDWR)) == -1) {
+        ALOGE("Error while opening device %s: %s", "/dev/v4l-subdev0", strerror(errno));
+        return false;
+    }
+    if (ioctl(fd, VIDIOC_SUBDEV_S_FMT, &sub_format) < 0) {
+        ALOGE("%s VIDIOC_SUBDEV_S_FMT: %s", "/dev/v4l-subdev0", strerror(errno));
+        return false;
+    }
+    close(fd);
+
+    return true;
+}
+
 
 // Methods from ::android::hardware::automotive::evs::V1_0::IEvsEnumerator follow.
 Return<void> EvsEnumerator::getCameraList(getCameraList_cb _hidl_cb)  {

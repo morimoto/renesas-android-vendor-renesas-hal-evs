@@ -83,8 +83,8 @@ private:
 
     static wp<EvsDisplay>          sActiveDisplay; // Weak pointer. Object destructs if client dies.
 
-    static bool subdevCameraSetup(const char *subdev_name);
-
+    static bool enumerateCamerasSalvator();
+    static bool enumerateCamerasKingfisher();
 };
 
 } // namespace renesas
